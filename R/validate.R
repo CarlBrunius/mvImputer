@@ -168,8 +168,7 @@ check_tuning <- function(tol, maxIter, method, nComp, ntree, mtry) {
   invisible(NULL)
 }
 
-# Only the shape is checked here. That a table guess is non-missing where X has gaps is
-# not checked (see the task report); mvImpute() must not read a guess it has not vetted.
+# Only the shape is checked here. Non-NA at missing cells is checked by first_guess() (R/encode.R).
 check_guess <- function(guess, X) {
   ok_name  <- is.character(guess) && length(guess) == 1L && guess %in% GUESS_CHOICES
   ok_table <- (is.matrix(guess) || is.data.frame(guess)) && identical(dim(guess), dim(X))
