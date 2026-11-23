@@ -75,8 +75,9 @@ local_rng_guard <- function(envir = parent.frame()) {
 # adding or removing excluded columns cannot change any imputation (spec section 5.5).
 # The first stream is the state set.seed(seed) produces; every further stream is
 # nextRNGStream() of the previous one, in stage-major order (column fastest). Streams are
-# therefore distinct. Within a stage, stream j does not depend on n_col (a later stage
-# does: it starts n_col streams further along the chain).
+# therefore distinct. Stream (s, j) is chain position (s - 1) * n_col + j, so only stage-1
+# streams are independent of n_col; later stages depend on it. That is harmless: n_col is
+# ncol(W), fixed for a data set (excluded columns are not counted).
 make_streams <- function(seed, n_stage, n_col) {
   check_seed(seed)
   stopifnot("n_stage must be a whole number >= 1" = is_whole(n_stage, 1),   # BLOCKING

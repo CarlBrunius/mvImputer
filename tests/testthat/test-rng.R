@@ -86,10 +86,12 @@ test_that("make_streams is a pure function of its arguments", {
   expect_false(identical(make_streams(10L, 2L, 2L), a))
 })
 
-test_that("a stream depends only on its position, not on how many columns follow", {
+test_that("a stage-1 stream depends only on its position, not on how many columns follow", {
   small <- make_streams(5L, 2L, 2L)
   big   <- make_streams(5L, 2L, 3L)
-  # Within a stage, stream k is the same whatever n_col is (keyed by position in W).
+  # Stage 1 only: stream k is the same whatever n_col is (keyed by position in W). Later
+  # stages start n_col streams further along the chain, so they depend on n_col; harmless
+  # because n_col = ncol(W) is fixed for a data set.
   expect_identical(small[[1]][[1]], big[[1]][[1]])
   expect_identical(small[[1]][[2]], big[[1]][[2]])
 })
