@@ -1,3 +1,7 @@
 NOTES*.md
 preflight.md
 ledger*.md
+dev/logs/*.log
+.Rhistory
+*.tar.gz
+*.Rcheck/

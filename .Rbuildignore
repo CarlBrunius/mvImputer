@@ -1,0 +1,8 @@
+^bench$
+^dev$
+^docs$
+^\.git
+^.*\.Rproj$
+^NOTES.*\.md$
+^\.push-policy$
+^\.superpowers$
