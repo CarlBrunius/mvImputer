@@ -6,7 +6,9 @@
 #   come from pre-generated streams (rng.R), never from the worker that happens to run
 #   a task.
 # Usage (internal):
-#   n <- local_workers(workers)    # at the top of mvImpute(); returns workers in effect
+#   n <- local_workers(workers)    # in mvImpute(), after the no-missing early return;
+#                                  # returns workers in effect
+#   check_workers(workers)         # validation alone (mvImpute() runs it before the return)
 # Dependencies: future (plan, multisession, nbrOfWorkers, availableCores).
 #
 # Rules (workers argument):
@@ -26,11 +28,17 @@
 
 MAX_AUTO_WORKERS <- 8L
 
-local_workers <- function(workers, envir = parent.frame()) {
-  # The upper bound keeps as.integer() below from turning e.g. 3e9 into NA with a warning.
-  if (!is.null(workers) && !(is_whole(workers, 1) && workers <= .Machine$integer.max)) {  # BLOCKING
+# BLOCKING check, shared with mvImpute() so a bad `workers` is refused even when the call
+# returns early and never starts a pool. The upper bound keeps as.integer() in
+# local_workers() from turning e.g. 3e9 into NA with a warning.
+check_workers <- function(workers) {
+  if (!is.null(workers) && !(is_whole(workers, 1) && workers <= .Machine$integer.max))
     stop("workers must be NULL or a whole number >= 1", call. = FALSE)
-  }
+  invisible(workers)
+}
+
+local_workers <- function(workers, envir = parent.frame()) {
+  check_workers(workers)
 
   if (is.null(workers)) {
     # The user's plan is neither replaced nor restored: touching it would restart their workers.

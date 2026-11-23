@@ -27,8 +27,10 @@ mvImpute(
 \code{mixOmics} package).}
 
 \item{exclude}{Character vector of column names that are passed through untouched
-(identifiers, the outcome). All input checks except "unknown column name" skip them.
-At least two columns must remain.}
+(identifiers, the outcome). The checks on column values and types skip them; the
+checks that column names are unique, that \code{X} is a data frame or numeric matrix and
+that every name in \code{exclude} exists cover all columns. At least two columns must
+remain.}
 
 \item{seed}{\code{NULL} (draw one integer from the caller's random-number generator) or a
 single whole number within the integer range. The seed used is recorded in the
@@ -63,7 +65,8 @@ number of predictors).}
 \code{X} with its missing values filled, in the same class, with the original
 column types (factor levels including unused ones, ordered factors, character,
 logical), row names and column names. Observed values are returned exactly as given.
-If \code{X} has no missing values it is returned unchanged with a message.
+If \code{X} has no missing values in the columns to impute it is returned unchanged with
+a message; its diagnostics then have \code{workers = NA} and empty per-stage fields.
 
 The diagnostics are in \code{attr(out, "mvImpute")}, a list with
 \itemize{

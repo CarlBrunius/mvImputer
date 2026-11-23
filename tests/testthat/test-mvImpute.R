@@ -3,15 +3,17 @@
 # Never more than 2 workers except in tests behind skip_on_cran(). Multisession workers
 # load the INSTALLED package, so run these with load_package = 'installed'.
 #
-# Warnings: the package's own final-stage "not converged" warning is muffled where it is
+# Warnings: the package's own final-stage not-converged warning is muffled where it is
 # not under test (imp() below). Nothing else is ever muffled here: backend warnings must
 # stay visible to the tests that look for them (Review Focus 5).
 
 strip <- function(x) { attr(x, "mvImpute") <- NULL; x }
 
+# The pinned text of the package's own warning; any other warning is left alone.
+NC_WARNING <- "imputed cells not converged after maxIter in the final stage"
 quiet_nc <- function(expr) {
   withCallingHandlers(expr, warning = function(w) {
-    if (grepl("not converged", conditionMessage(w), fixed = TRUE)) invokeRestart("muffleWarning")
+    if (grepl(NC_WARNING, conditionMessage(w), fixed = TRUE)) invokeRestart("muffleWarning")
   })
 }
 imp <- function(...) quiet_nc(mvImpute(...))
@@ -132,7 +134,7 @@ test_that("numeric matrix input: class, dimnames and diagnostics", {
 })
 test_that("an unnamed matrix returns unnamed; diagnostics use V<k>", {
   X <- punch_holes(sim_numeric(50, 5, seed = 1), 0.1, "mcar", seed = 2); dimnames(X) <- NULL
-  out <- suppressWarnings(mvImpute(X, seed = 1, workers = 1, tol = c(1e-9, 1e-9), maxIter = c(1, 1)))
+  out <- imp(X, seed = 1, workers = 1, tol = c(1e-9, 1e-9), maxIter = c(1, 1))
   expect_null(dimnames(out))
   nc <- attr(out, "mvImpute")$not_converged
   expect_true(all(nc[[2]]$column %in% paste0("V", 1:5))); expect_gt(nrow(nc[[2]]), 0L)
@@ -237,11 +239,48 @@ test_that("no missing values: input returned with a message and the diagnostics"
   expect_message(out <- mvImpute(d0, seed = 1, workers = 1), "no missing")
   expect_identical(strip(out), d0)
   expect_identical(attr(out, "mvImpute")$seed, 1L)
-  expect_message(mvImpute(d0, seed = 1, workers = 1), "X has no missing values; returned unchanged.", fixed = TRUE)
+  expect_message(mvImpute(d0, seed = 1, workers = 1), "X has no missing values in the columns to impute; returned unchanged.", fixed = TRUE)
+})
+
+test_that("no-missing return: diagnostics are empty, one draw with seed = NULL, gaps only in exclude", {
+  dg <- attr(suppressMessages(mvImpute(d0, seed = 1, workers = 1)), "mvImpute")
+  expect_true(is.na(dg$workers)); expect_identical(dg$iterations, integer())
+  expect_identical(dg$not_converged, list()); expect_identical(dg$time, numeric())
+  # seed = NULL costs exactly the draw resolve_seed() makes, and records it.
+  withr::local_preserve_seed()
+  set.seed(3); drawn <- sample.int(.Machine$integer.max, 1L); s_one <- .Random.seed
+  set.seed(3)
+  out <- suppressMessages(mvImpute(d0, workers = 1))
+  expect_identical(.Random.seed, s_one)
+  expect_identical(attr(out, "mvImpute")$seed, drawn)
+  # Gaps only in an excluded column: nothing to impute, the gaps come back as they were.
+  d <- d0; d$y <- c(NA, rnorm(nrow(d0) - 1L))
+  expect_message(o2 <- mvImpute(d, exclude = "y", seed = 1, workers = 1),
+                 "no missing values in the columns to impute")
+  expect_identical(strip(o2), d)
+})
+test_that("workers is validated even when there is nothing to impute", {
+  expect_error(mvImpute(d0, workers = "x"), "workers must be NULL or a whole number")
+  expect_error(mvImpute(dh, workers = 3e9), "workers must be NULL or a whole number")
+})
+test_that("an error after the pool started restores RNG state, kind and plan", {
+  skip_on_cran()
+  X <- punch_holes(sim_numeric(40, 5, seed = 1), 0.1, "mcar", seed = 2)
+  g <- ifelse(is.na(X), 1, X); g[which(is.na(X))[1]] <- NA   # first_guess() fails, after local_workers(2)
+  withr::local_preserve_seed()
+  old <- future::plan(future::sequential); withr::defer(future::plan(old))
+  set.seed(3); sample.int(.Machine$integer.max, 1L); s_one <- .Random.seed   # state after exactly one draw
+  set.seed(3); kind0 <- RNGkind()
+  expect_error(mvImpute(X, guess = g, workers = 2, maxIter = c(2, 2)), "guess is NA")
+  expect_identical(.Random.seed, s_one)
+  expect_identical(RNGkind(), kind0)
+  expect_true(inherits(future::plan(), "sequential"))
+  expect_equal(future::nbrOfWorkers(), 1)
 })
 
 test_that("bad arguments are refused before any work", {
-  expect_error(mvImpute(dh, mtry = NULL), "mtry")
+  expect_error(mvImpute(dh, mtry = NULL), "mtry must be a single positive whole number", fixed = TRUE)
+  expect_error(mvImpute(dh, mtry = 0), "mtry must be a single positive whole number", fixed = TRUE)
   expect_error(mvImpute(dh, forceZero = NA), "forceZero")
   expect_error(mvImpute(dh, method = "nope"), "should be one of")
   expect_error(mvImpute(dh, ntree = 0), "ntree")
@@ -260,7 +299,7 @@ test_that("options and environment are untouched by a call", {
 
 test_that("a user's multisession plan is used with workers = NULL and left in place", {
   skip_on_cran()
-  future::plan(future::multisession, workers = 2); withr::defer(future::plan(future::sequential))
+  old <- future::plan(future::multisession, workers = 2); withr::defer(future::plan(old))
   before <- pool_pids()
   out <- imp(dh, seed = 1, workers = NULL, maxIter = c(2, 2))
   expect_identical(attr(out, "mvImpute")$workers, 2L)
@@ -270,7 +309,7 @@ test_that("a user's multisession plan is used with workers = NULL and left in pl
 })
 test_that("workers = 1 restores the caller's plan afterwards", {
   skip_on_cran()
-  future::plan(future::multisession, workers = 2); withr::defer(future::plan(future::sequential))
+  old <- future::plan(future::multisession, workers = 2); withr::defer(future::plan(old))
   imp(dh, seed = 1, workers = 1, maxIter = c(2, 2))
   expect_true(inherits(future::plan(), "multisession"))
   expect_equal(future::nbrOfWorkers(), 2)

@@ -96,8 +96,10 @@
 #' @param method `"ranger"` (default), `"randomForest"`, or `"pls"` (needs the
 #'   `mixOmics` package).
 #' @param exclude Character vector of column names that are passed through untouched
-#'   (identifiers, the outcome). All input checks except "unknown column name" skip them.
-#'   At least two columns must remain.
+#'   (identifiers, the outcome). The checks on column values and types skip them; the
+#'   checks that column names are unique, that `X` is a data frame or numeric matrix and
+#'   that every name in `exclude` exists cover all columns. At least two columns must
+#'   remain.
 #' @param seed `NULL` (draw one integer from the caller's random-number generator) or a
 #'   single whole number within the integer range. The seed used is recorded in the
 #'   diagnostics.
@@ -121,7 +123,8 @@
 #' @return `X` with its missing values filled, in the same class, with the original
 #'   column types (factor levels including unused ones, ordered factors, character,
 #'   logical), row names and column names. Observed values are returned exactly as given.
-#'   If `X` has no missing values it is returned unchanged with a message.
+#'   If `X` has no missing values in the columns to impute it is returned unchanged with
+#'   a message; its diagnostics then have `workers = NA` and empty per-stage fields.
 #'
 #'   The diagnostics are in `attr(out, "mvImpute")`, a list with
 #'   * `seed`: the seed used; `rng_kind`: `"L'Ecuyer-CMRG"`; `method`;
@@ -157,13 +160,15 @@ mvImpute <- function(X, method = c("ranger", "randomForest", "pls"), exclude = N
                      maxIter = c(15, 60), guess = "minVar", forceZero = FALSE,
                      ntree = 100, mtry = 5, nComp = 2, verbose = FALSE) {
   method <- match.arg(method)
-  # BLOCKING. check_input() lets mtry = NULL through ("not supplied"); the backends need a number.
-  if (is.null(mtry)) stop("mtry must be a single positive whole number", call. = FALSE)
+  # BLOCKING, and before check_input(): that function lets mtry = NULL through ("not
+  # supplied") but the backends need a number, so mvImpute() has its own single message.
+  if (!is_pos_whole(mtry)) stop("mtry must be a single positive whole number", call. = FALSE)
   flag_ok <- function(x) is.logical(x) && length(x) == 1L && !is.na(x)
   if (!flag_ok(forceZero) || !flag_ok(verbose))                                  # BLOCKING
     stop("forceZero and verbose must each be TRUE or FALSE", call. = FALSE)
   check_input(X, exclude = exclude, tol = tol, maxIter = maxIter, method = method,
               nComp = nComp, ntree = ntree, mtry = mtry, guess = guess)
+  check_workers(workers)   # validates only; the pool starts later, after the early return
 
   seed <- resolve_seed(seed)          # before the guard: the one draw must survive it
   local_rng_guard()
@@ -177,7 +182,7 @@ mvImpute <- function(X, method = c("ranger", "randomForest", "pls"), exclude = N
                       not_converged = list(), time = numeric(), oob_error = numeric(),
                       rows_no_observed = rows_without_observed(X, exclude))
   if (!any(enc$miss)) {
-    message("X has no missing values; returned unchanged.")
+    message("X has no missing values in the columns to impute; returned unchanged.")
     attr(X, "mvImpute") <- diagnostics
     return(X)
   }
