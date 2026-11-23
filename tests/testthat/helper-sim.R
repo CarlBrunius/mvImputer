@@ -18,13 +18,37 @@ SIM_N_LATENT   <- 3     # latent factors behind sim_numeric()
 SIM_NOISE_SD   <- 0.5   # idiosyncratic noise on the log scale in sim_numeric()
 SIM_SIGNAL_SCL <- 0.5   # scale of the latent signal on the log scale
 
+# RNG kinds are pinned: with_seed(seed, ...) alone uses the CALLER's active kinds,
+# so the same seed would give different data under RNGkind("L'Ecuyer-CMRG") or
+# sample.kind = "Rounding". All three helpers go through sim_seeded() below.
+SIM_RNG_KIND        <- "Mersenne-Twister"
+SIM_RNG_NORMAL_KIND <- "Inversion"
+SIM_RNG_SAMPLE_KIND <- "Rejection"
+
+# sim_seeded: evaluate `code` under a scoped seed and the pinned RNG kinds, then
+# restore the caller's kinds and .Random.seed. The kinds are restored explicitly
+# because withr 3.0.3 restores .Random.seed but not the kind: RNGkind() would keep
+# reporting the pinned kind, and a caller with no .Random.seed would silently lose
+# its kind. Order matters: RNGkind() is reset INSIDE with_seed (it rescrambles the
+# scratch seed, which is discarded); withr then puts the caller's seed back.
+# `code` is a promise from the calling helper, so its assignments land there.
+sim_seeded <- function(seed, code) {
+  force(seed)
+  kind_before <- RNGkind()
+  withr::with_seed(seed, .rng_kind = SIM_RNG_KIND, .rng_normal_kind = SIM_RNG_NORMAL_KIND,
+                   .rng_sample_kind = SIM_RNG_SAMPLE_KIND, {
+    tryCatch(code, finally = suppressWarnings(
+      RNGkind(kind_before[1], kind_before[2], kind_before[3])))
+  })
+}
+
 # --- sim_numeric: positive, log-normal, low-rank + noise (omics-like) -----------
 # Returns an n x p numeric matrix, colnames F1..Fp. Exp of a rank-3 Gaussian signal
 # plus noise gives correlated, right-skewed, strictly positive columns.
 sim_numeric <- function(n, p, seed) {
   stopifnot(is.numeric(n), length(n) == 1, n >= 1,           # BLOCKING
             is.numeric(p), length(p) == 1, p >= 1)
-  withr::with_seed(seed, {
+  sim_seeded(seed, {
     Z <- matrix(stats::rnorm(n * SIM_N_LATENT), n, SIM_N_LATENT)
     L <- matrix(stats::rnorm(SIM_N_LATENT * p), SIM_N_LATENT, p)
     E <- matrix(stats::rnorm(n * p, sd = SIM_NOISE_SD), n, p)
@@ -42,7 +66,7 @@ sim_numeric <- function(n, p, seed) {
 sim_mixed <- function(n, seed, extra = 0) {
   stopifnot(is.numeric(n), length(n) == 1, n >= 4,           # BLOCKING: quartiles need n >= 4
             is.numeric(extra), length(extra) == 1, extra >= 0)
-  withr::with_seed(seed, {
+  sim_seeded(seed, {
     e  <- function(s) stats::rnorm(n, sd = s)
     z1 <- stats::rnorm(n)
     z2 <- stats::rnorm(n)
@@ -52,8 +76,10 @@ sim_mixed <- function(n, seed, extra = 0) {
     num3 <- z2 + e(0.3)
     num4 <- z1 - z2 + e(0.3)
     int1 <- as.integer(round(5 + 2 * z1 + e(0.5)))
-    # ties.method = "first": ties have probability zero with continuous input, but
-    # the default ("random") would consume RNG draws if one ever occurred.
+    # ties.method = "first": the default ("random") treats values within a small
+    # relative tolerance (about 1e-5) as ties and then draws from the RNG, so the
+    # data would differ from this pinned process for a small share of seeds. "first"
+    # departs from that literal default only for those seeds (none the plan names).
     fac3 <- factor(c("a", "b", "c")[max.col(cbind(num1, num2, num3) + e(0.3),
                                             ties.method = "first")],
                    levels = c("a", "b", "c"))
@@ -75,8 +101,10 @@ sim_mixed <- function(n, seed, extra = 0) {
 
 # --- punch_holes: impose missingness on a matrix or data.frame ------------------
 # "mcar": exactly round(frac * cells-in-cols) cells, uniform over cols, any type.
-# "left": in each NUMERIC column of cols, the lowest round(frac * n) values become
-#   NA (detection-limit pattern: deterministic, so `seed` has no effect there).
+# "left": in each NUMERIC column of cols, the lowest k = round(frac * n) values become
+#   NA (detection-limit pattern: deterministic, so `seed` has no effect there). n
+#   counts pre-existing NAs, and ties at the threshold are broken by row position
+#   (order()), so on tied integer columns it is not a strict detection-limit pattern.
 # cols: NULL (all), integer positions or character names.
 punch_holes <- function(X, frac, mechanism = c("mcar", "left"), seed, cols = NULL) {
   mechanism <- match.arg(mechanism)
@@ -95,7 +123,7 @@ punch_holes <- function(X, frac, mechanism = c("mcar", "left"), seed, cols = NUL
   }
   col_is_numeric <- function(j) is.numeric(if (is_df) X[[j]] else X[, j])
 
-  withr::with_seed(seed, {
+  sim_seeded(seed, {
     if (mechanism == "mcar") {
       n_cells <- n * length(cols)
       hit  <- sample.int(n_cells, round(frac * n_cells))     # cell index, column-major in cols

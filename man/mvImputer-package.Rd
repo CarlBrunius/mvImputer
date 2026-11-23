@@ -6,7 +6,7 @@
 \alias{mvImputer-package}
 \title{mvImputer: multivariate imputation of mixed-type data}
 \description{
-Package-level documentation. The only exported function is `mvImpute()`.
+Package-level documentation. The only exported function is \code{mvImpute()}.
 }
 \seealso{
 Useful links:

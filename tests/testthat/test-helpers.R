@@ -17,7 +17,29 @@ test_that("sim_mixed has the documented columns and classes", {
   expect_false(anyNA(d))
 })
 test_that("helpers are reproducible and do not touch the caller's RNG", {
-  set.seed(9); s <- .Random.seed
+  withr::local_seed(9); s <- .Random.seed
   expect_identical(sim_mixed(50, seed = 3), sim_mixed(50, seed = 3))
   expect_identical(s, .Random.seed)
+})
+test_that("helpers give the same data whatever RNG kind the caller has active", {
+  X0 <- sim_numeric(30, 4, seed = 3)
+  D0 <- sim_mixed(50, seed = 3)
+  H0 <- punch_holes(D0, 0.2, "mcar", seed = 5)
+  kind_default <- RNGkind()
+  kind_other   <- c("L'Ecuyer-CMRG", "Box-Muller", "Rounding")
+  # Cleanups run last-in-first-out: kind is reset first, then the old seed is put back.
+  withr::local_preserve_seed()
+  withr::defer(suppressWarnings(RNGkind(kind_default[1], kind_default[2], kind_default[3])))
+  suppressWarnings(RNGkind(kind_other[1], kind_other[2], kind_other[3]))
+  set.seed(9); s <- .Random.seed
+  expect_identical(sim_numeric(30, 4, seed = 3), X0)
+  expect_identical(sim_mixed(50, seed = 3), D0)
+  expect_identical(punch_holes(D0, 0.2, "mcar", seed = 5), H0)
+  expect_identical(RNGkind(), kind_other)      # the caller's kind is restored ...
+  expect_identical(s, .Random.seed)            # ... and so is the caller's seed
+  # A caller with no .Random.seed at all must keep its kind too.
+  rm(".Random.seed", envir = globalenv())
+  expect_identical(sim_mixed(50, seed = 3), D0)
+  expect_identical(RNGkind(), kind_other)
+  expect_false(exists(".Random.seed", envir = globalenv()))
 })
