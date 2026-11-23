@@ -174,3 +174,12 @@ test_that("rows_without_observed() lists rows empty in the non-excluded columns"
   expect_identical(rows_without_observed(M), 2L)
   expect_identical(rows_without_observed(sim_mixed(10, 1)), integer(0))
 })
+
+test_that("duplicate column names are an error, excluded columns included", {
+  M <- cbind(a = c(1, NA, 3, 4), a = c(5, 5, NA, 5), b = c(1, 2, 3, 4))
+  expect_error(ci(M), "Column names must be unique (duplicated: 'a')", fixed = TRUE)
+  d <- d40(); names(d)[2] <- "num1"
+  expect_error(ci(d), "Column names must be unique (duplicated: 'num1')", fixed = TRUE)
+  expect_error(ci(d, exclude = "const"), "Column names must be unique")
+  expect_silent(ci(matrix(rnorm(12), 4, 3)))               # unnamed matrix: unaffected
+})

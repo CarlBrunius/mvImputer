@@ -166,3 +166,50 @@ test_that("design matrix keeps numeric NA before the first guess and has one blo
   expect_identical(names(dm$map), enc$colnames)
   expect_identical(sort(unlist(dm$map, use.names = FALSE)), seq_len(ncol(dm$D)))
 })
+
+# --- fix round 1 ----------------------------------------------------------------
+
+test_that("a constant is written into missing cells only: 0 and -0 keep their bits", {
+  m <- cbind(a = c(0, -0, NA, 0), b = c(1, 2, 3, 4))
+  enc <- encode_input(m, NULL)
+  expect_identical(enc$constant, "a")
+  out <- decode_output(first_guess(enc$W, enc, "minVar"), enc)
+  expect_identical(1 / out[1:2, "a"], c(Inf, -Inf))        # sign of zero is observed data
+  expect_identical(1 / unname(out[4, "a"]), Inf)
+  expect_identical(unname(out[3, "a"]), 0)
+})
+
+test_that("an observed constant column is not rewritten when another column is constant too", {
+  m <- cbind(a = c(1, NA, 3, 4), b = c(5, 5, NA, 5), c = c(1, 2, 3, 5))
+  enc <- encode_input(m, NULL)
+  out <- decode_output(first_guess(enc$W, enc, "median"), enc)
+  expect_identical(unname(out[, "a"]), c(1, 3, 3, 4))
+  expect_identical(unname(out[, "b"]), c(5, 5, 5, 5))
+})
+
+test_that("decode ignores a W that was altered at an observed cell", {
+  d <- sim_mixed(30, seed = 1); d$num1[2] <- NA
+  enc <- encode_input(d, NULL); W <- first_guess(enc$W, enc, "minVar")
+  W[1, "num1"] <- 1e6; W[1, "fac3"] <- 3; W[1, "const"] <- -1
+  expect_identical(decode_output(W, enc)[1, ], d[1, ])
+})
+
+test_that("minTotal ignores an excluded column holding the smallest value", {
+  m <- cbind(y = c(-1000, 1, 2, 3), a = c(1, NA, 3, 10), b = c(-5, 2, NA, 4))
+  enc <- encode_input(m, exclude = "y")
+  expect_equal(unname(first_guess(enc$W, enc, "minTotal")[2, "a"]), -5)
+})
+
+test_that("design matrix refuses level codes outside 1..K and has unique column names", {
+  d <- sim_mixed(30, seed = 1); enc <- encode_input(d, NULL)
+  W <- enc$W; W[1, "fac3"] <- 4
+  expect_error(design_matrix(W, enc), "fac3.*valid level codes")
+  W <- enc$W; W[1, "chr2"] <- 1.5
+  expect_error(design_matrix(W, enc), "chr2.*valid level codes")
+
+  d2 <- data.frame(f = factor(c("a", "b", "a", "b", "a")), f_a = c(0.1, 0.2, 0.3, 0.4, 0.5))
+  e2 <- encode_input(d2, NULL); dm <- design_matrix(e2$W, e2)
+  expect_false(anyDuplicated(colnames(dm$D)) > 0)
+  expect_identical(unname(dm$D[, dm$map[["f_a"]]]), d2$f_a)           # map still points right
+  expect_identical(unname(dm$D[, dm$map[["f"]][1]]), c(1, 0, 1, 0, 1))
+})

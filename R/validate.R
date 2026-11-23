@@ -62,6 +62,13 @@ check_input <- function(X, exclude, tol, maxIter, method, nComp,
     stop("A matrix X must be a numeric matrix (it is ", typeof(X),              # BLOCKING
          "); use a data.frame for mixed types", call. = FALSE)
 
+  # Names are the key of the internal data model (levels, constants, exclude); duplicates
+  # would silently mix up columns. Excluded columns count: exclude by name is ambiguous.
+  nm <- colnames(X)
+  if (!is.null(nm) && anyDuplicated(nm))
+    stop("Column names must be unique (duplicated: ", fmt_names(unique(nm[duplicated(nm)])), # BLOCKING
+         "); rename them, e.g. with make.unique().", call. = FALSE)
+
   labels <- col_labels(X)
   check_exclude(exclude, colnames(X))   # real names only: V1.. are labels, not names
   use <- which(!(labels %in% exclude))

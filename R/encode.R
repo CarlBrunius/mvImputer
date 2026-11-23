@@ -31,6 +31,12 @@
 # encode_input(). They are not in W, miss or D, and decode_output() starts from a copy
 # of X, so they come back untouched, gaps included.
 #
+# Names and row names: column names must be unique (check_input() refuses duplicates), so
+# enc$constant and enc$levels are looked up by name. W, miss and D carry ROW names (X's own,
+# else "1".."n"): a matrix with only column names returns NAMED scalars from W[i, "col"].
+# Traps: W[rows, k] is a named vector (use unname() before identical()); which(arr.ind = TRUE)
+# on miss returns row names in its dimnames.
+#
 # Observed values: decode_output() takes them from enc$W, never from the W it is given,
 # so no stage can alter an observed cell by mistake; only missing cells come from W.
 #
@@ -118,14 +124,18 @@ design_matrix <- function(W, enc) {
       return(m)
     }
     codes <- W[, k]
+    lv <- enc$levels[[nm]]
     if (anyNA(codes))
       stop("column '", nm, "' has missing level codes; fill them (first_guess()) ",  # BLOCKING
            "before design_matrix()", call. = FALSE)
+    # A code outside 1..K would give an all-zero one-hot row, i.e. "no level".
+    if (any(codes != round(codes) | codes < 1 | codes > length(lv)))
+      stop("column '", nm, "' holds values that are not valid level codes",       # BLOCKING
+           call. = FALSE)
     if (enc$type[k] == TYPE_ORDERED) {
       m <- matrix(codes, ncol = 1L, dimnames = list(NULL, nm))
       return(m)
     }
-    lv <- enc$levels[[nm]]
     m <- outer(codes, seq_along(lv), "==") * 1
     colnames(m) <- paste0(nm, "_", lv)
     m
@@ -134,7 +144,11 @@ design_matrix <- function(W, enc) {
   starts <- ends - vapply(blocks, ncol, 1L) + 1L
   map <- Map(seq.int, starts, ends)
   names(map) <- enc$colnames
-  list(D = do.call(cbind, blocks), map = map)
+  D <- do.call(cbind, blocks)
+  # D's names are internal labels and can collide (numeric column "f_a" next to factor f with
+  # level "a"); map holds the indices, so unique names lose nothing.
+  colnames(D) <- make.unique(colnames(D))
+  list(D = D, map = map)
 }
 
 # --- first_guess ----------------------------------------------------------------
@@ -208,7 +222,8 @@ table_guess <- function(guess, enc, k) {
 
 # --- decode_output --------------------------------------------------------------
 # Back to the user's class, dimnames and column types. Starts from a copy of enc$X, so
-# excluded columns and all attributes are untouched. Per decoded column the value is
+# table-level attributes (dimnames, row names, class) and excluded columns are untouched;
+# column attributes of DECODED columns are not kept, except on a double column. Per decoded column the value is
 # enc$W at observed cells (exact copy of the input), W at missing cells, and the constant
 # for a constant column. Cells of W that are still NA stay NA (a decode before
 # first_guess(), used by the round-trip tests).
@@ -227,7 +242,9 @@ decode_output <- function(W, enc) {
     miss_k <- enc$miss[, k]
     v <- unname(enc$W[, k])
     v[miss_k] <- W[miss_k, k]
-    if (const[k]) v[] <- enc$W[!miss_k, k][1L]
+    # Only missing cells: observed cells must come from enc$W alone (0 and -0 are one
+    # constant but different bits).
+    if (const[k]) v[miss_k] <- enc$W[!miss_k, k][1L]
     j <- enc$keep[k]
     orig <- if (is.data.frame(out)) out[[j]] else NULL
     col <- decode_column(v, enc$class[k], enc$levels[[enc$colnames[k]]], orig,
