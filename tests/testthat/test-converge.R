@@ -25,6 +25,11 @@ test_that("col_scales uses observed values only", {
   miss <- cbind(a = c(FALSE, FALSE, FALSE, TRUE), b = c(FALSE, FALSE, FALSE, TRUE), f = FALSE)
   expect_equal(col_scales(W, miss, c("numeric", "numeric", "nominal")), c(1, 0, NA))
 })
+test_that("col_scales gives 0 for a column with a single observed value", {
+  W <- cbind(a = c(4, 1, 2), b = c(1, 2, 3))
+  miss <- cbind(a = c(FALSE, TRUE, TRUE), b = FALSE)
+  expect_equal(col_scales(W, miss, c("numeric", "numeric")), c(0, 1))
+})
 
 # Additions beyond the brief: mixed vectors, and the zero-scale / NA-scale edges.
 test_that("mixed numeric and factor cells are judged per type, never NA", {
@@ -35,10 +40,19 @@ test_that("mixed numeric and factor cells are judged per type, never NA", {
   expect_identical(res$same, c(FALSE, TRUE, FALSE))
   expect_false(anyNA(res$converged))
 })
-test_that("a zero scale converges only when nothing moved", {
-  expect_true(converge_cells(5, 5, FALSE, 0, FALSE, 0.05)$converged)
-  expect_false(converge_cells(5, 5.1, FALSE, 0, FALSE, 0.05)$converged)
+test_that("a zero or negative scale on a numeric cell is an error (spec 5.1 invariant)", {
+  expect_error(converge_cells(5, 5, FALSE, 0, FALSE, 0.05), "section 5.1")
+  expect_error(converge_cells(0.1, sum(rep(0.1, 3)) / 3, FALSE, 0, FALSE, 0.05), "section 5.1")
+  expect_error(converge_cells(5, 5.1, FALSE, -1, FALSE, 0.05), "section 5.1")
+  expect_error(converge_cells(5, 5.1, FALSE, Inf, FALSE, 0.05), "section 5.1")
+})
+test_that("a zero scale on a factor cell is ignored", {
+  expect_true(converge_cells(2, 2, TRUE, 0, TRUE, 0.05)$converged)
+})
+test_that("is_factor and prev_same must be logical, not 0/1", {
+  expect_error(converge_cells(1, 1, FALSE, 1, 0, 0.05))
+  expect_error(converge_cells(1, 1, 0, 1, FALSE, 0.05))
 })
 test_that("a numeric cell with an NA scale is an error, not a silent NA", {
-  expect_error(converge_cells(1, 2, FALSE, NA, FALSE, 0.05), "missing scale")
+  expect_error(converge_cells(1, 2, FALSE, NA, FALSE, 0.05), "section 5.1")
 })

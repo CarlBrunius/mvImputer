@@ -33,10 +33,10 @@
 #' Returned unnamed, one value per column of `W`.
 #'
 #' Failure states: a numeric column with fewer than two observed values, or a constant
-#' one, gets scale 0 (the engine removes constant columns beforehand, section 5.1, so
-#' 0 is not expected in use; `converge_cells()` treats a 0 scale as "any change is
-#' not converged" rather than dividing by it silently). Factor-like columns get `NA`
-#' and are never scaled.
+#' one, gets scale 0. Such a column may sit in `W` as a non-target (spec section 5.1
+#' removes or rejects them as imputation targets), so `col_scales()` reports 0 rather
+#' than failing; `converge_cells()` errors if a target numeric cell carries a 0 scale.
+#' Factor-like columns get `NA` and are never scaled.
 #'
 #' @param W Numeric matrix (cells to impute hold any value; only observed ones are used).
 #' @param miss Logical matrix, same dimensions as `W`, `TRUE` where the cell is missing.
@@ -82,6 +82,7 @@ converge_cells <- function(old, new, prev_same, scale, is_factor, tol) {
   # BLOCKING: equal lengths; recycling here would pair cells with the wrong scale.
   stopifnot(length(old) == n, length(prev_same) == n, length(scale) == n,
             length(is_factor) == n, length(tol) == 1L, is.finite(tol), tol > 0,
+            is.logical(is_factor), is.logical(prev_same),
             !anyNA(is_factor), !anyNA(prev_same), !anyNA(old))
   # BLOCKING: a NaN/Inf prediction would make the comparison NA, and NA is neither
   # converged nor still left. Failing loudly is the only safe outcome.
@@ -89,22 +90,29 @@ converge_cells <- function(old, new, prev_same, scale, is_factor, tol) {
     stop("non-finite prediction: ", sum(!is.finite(new)), " of ", n,
          " cells; the learner returned NA/NaN/Inf", call. = FALSE)
   }
-  # BLOCKING: every numeric cell needs a usable scale; an NA scale would turn
-  # `converged` into NA for that cell (factor cells never use their scale).
-  if (anyNA(scale[!is_factor])) {
-    stop("numeric cell with missing scale; col_scales() must give every numeric ",
-         "column a finite scale", call. = FALSE)
+  # BLOCKING: every numeric cell needs a finite, strictly positive scale (spec section
+  # 5.1 removes constant columns and rejects columns with fewer than 2 observed values
+  # before any stage runs, so a zero scale here means that invariant broke upstream).
+  # Tolerating 0 is not safe: exact equality on learner output is fragile
+  # (sum(rep(0.1, 3)) / 3 == 0.1 is FALSE), so such a column would never converge and
+  # would run every stage to maxIter, which is the F2 failure again. An NA scale would
+  # make `converged` NA. Factor cells never use their scale.
+  sc <- scale[!is_factor]
+  if (!all(is.finite(sc) & sc > 0)) {
+    stop("numeric cell with a missing, non-finite or non-positive scale; spec section ",
+         "5.1 guarantees a positive scale for every imputed numeric column, so the ",
+         "column filter upstream failed", call. = FALSE)
   }
 
   same <- new == old
   converged <- logical(n)
   # Factor-like cells: two consecutive unchanged predictions.
   converged[is_factor] <- same[is_factor] & prev_same[is_factor]
-  # Numeric cells: SD-scaled change. `same` is checked first so that a zero scale with
-  # no change gives converged rather than 0/0 = NaN; a zero scale with a change gives
-  # Inf, which is not < tol, i.e. not converged.
+  # Numeric cells: SD-scaled change; the scale is finite and > 0 (checked above), so
+  # `change` is never NaN. `same` is kept as an explicit branch so that an unchanged
+  # cell converges regardless of rounding in the division.
   num <- !is_factor
   change <- abs(new[num] - old[num]) / scale[num]
-  converged[num] <- same[num] | (!is.nan(change) & change < tol)
+  converged[num] <- same[num] | change < tol
   list(converged = converged, same = same)
 }
