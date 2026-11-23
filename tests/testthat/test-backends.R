@@ -20,11 +20,16 @@ test_that("a constant predictor is dropped without backend warnings", {
   for (m in c("ranger", "randomForest", "pls"))
     expect_no_warning(withr::with_seed(2, fit_predict(m, x[1:50, 1], x[1:50, -1], x[51:60, -1], FALSE, NA, 1, 50, 2, 2)))
 })
-test_that("droplevels mapping: a level absent from training is never predicted", {
+test_that("droplevels mapping: a level absent from training is never predicted and the codes map back correctly", {
   x <- withr::with_seed(1, matrix(rnorm(100 * 2), 100)); colnames(x) <- c("x1", "x2")
   y <- ifelse(x[, 1] > 0, 1L, 3L)                    # level 2 of 3 never observed
-  r <- withr::with_seed(2, fit_predict("randomForest", y[1:80], x[1:80, ], x[81:100, ], TRUE, 3L, NA, 50, 1, 2))
-  expect_true(all(r$pred %in% c(1L, 3L)))
+  for (m in c("ranger", "randomForest", "pls")) {
+    if (m == "pls") skip_if_not_installed("mixOmics")
+    r <- withr::with_seed(2, fit_predict(m, y[1:80], x[1:80, ], x[81:100, ], TRUE, 3L, NA, 50, 1, 2))
+    expect_true(all(r$pred %in% c(1L, 3L)))
+    # a swapped 1 <-> 3 mapping would give accuracy near 0
+    expect_gt(mean(r$pred == y[81:100]), 0.8)
+  }
 })
 test_that("oob: near 0 for an exact function, near 1 for noise, NA for pls", {
   x <- withr::with_seed(1, matrix(rnorm(300 * 3), 300)); colnames(x) <- paste0("x", 1:3)
@@ -49,9 +54,14 @@ test_that("randomForest regression on a 0/1 numeric target gives no warning", {
 })
 test_that("same RNG state gives identical ranger and randomForest output", {
   x <- withr::with_seed(1, matrix(rnorm(100 * 3), 100)); colnames(x) <- paste0("x", 1:3); y <- x[, 1]
-  for (m in c("ranger", "randomForest"))
+  yc <- max.col(x)
+  for (m in c("ranger", "randomForest")) {
     expect_identical(withr::with_seed(5, fit_predict(m, y, x, x[1:5, ], FALSE, NA, 1, 50, 2, 2)),
                      withr::with_seed(5, fit_predict(m, y, x, x[1:5, ], FALSE, NA, 1, 50, 2, 2)))
+    # factor targets: ranger probability forest, randomForest vote fractions
+    expect_identical(withr::with_seed(5, fit_predict(m, yc, x, x[1:5, ], TRUE, 3L, NA, 50, 2, 2)),
+                     withr::with_seed(5, fit_predict(m, yc, x, x[1:5, ], TRUE, 3L, NA, 50, 2, 2)))
+  }
 })
 
 # --- additions (pre-flight rulings T6a, T6b, T6c and the audit floor) -----------------
@@ -129,6 +139,7 @@ test_that("factor oob is the misclassification rate: low when separable, high fo
 })
 
 test_that("ranger prediction.error of a probability forest is a Brier-type score, not the misclassification rate", {
+  skip_on_cran()   # pins a ranger internal; a ranger update must not fail a CRAN check
   # Evidence for the header note in R/backends.R and for computing the factor oob from
   # fit$predictions. If a ranger update changes this, the note must be revisited.
   x <- withr::with_seed(1, matrix(rnorm(300 * 3), 300)); colnames(x) <- paste0("x", 1:3)
@@ -145,4 +156,50 @@ test_that("ranger prediction.error of a probability forest is a Brier-type score
 test_that("non-finite predictor values are refused (blocking input check)", {
   x <- withr::with_seed(1, matrix(rnorm(40 * 2), 40)); colnames(x) <- c("x1", "x2")
   expect_error(fit_predict("ranger", x[, 1], x, rbind(c(NA_real_, 1)), FALSE, NA, 1, 20, 2, 2))
+})
+
+# --- PLS on small or rank-deficient training sets (mixOmics errors / warns otherwise) ----
+
+pls_small_cases <- function() {
+  x <- withr::with_seed(11, matrix(rnorm(12 * 3), 12)); colnames(x) <- paste0("x", 1:3)
+  ind <- cbind(a = c(1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0), b = c(0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1))
+  dup <- cbind(x[, 1], x[, 1], x[, 2]); colnames(dup) <- c("d1", "d2", "d3")
+  list(x = x, ind = ind, dup = dup,
+       y = x[, 1] + withr::with_seed(12, rnorm(12, sd = 0.1)), yc = c(1L, 2L, 3L, 1L, 2L, 3L, 1L, 2L, 3L, 1L, 2L, 3L))
+}
+
+test_that("pls works at n_train = 2 and 4 without error or warning", {
+  skip_if_not_installed("mixOmics")
+  d <- pls_small_cases()
+  for (n in c(2L, 4L)) {
+    xt <- d$x[1:n, , drop = FALSE]; xp <- d$x[9:12, , drop = FALSE]
+    r <- expect_no_warning(fit_predict("pls", d$y[1:n], xt, xp, FALSE, NA, 1, 20, 2, 3))
+    expect_length(r$pred, 4); expect_true(all(is.finite(r$pred)))
+    # two distinct classes in training so that a PLS-DA model is attempted
+    rf <- expect_no_warning(fit_predict("pls", d$yc[1:n], xt, xp, TRUE, 3L, NA, 20, 2, 3))
+    expect_length(rf$pred, 4); expect_true(all(rf$pred %in% 1:3))
+  }
+})
+
+test_that("pls works when the only predictors are complementary indicator columns", {
+  skip_if_not_installed("mixOmics")
+  d <- pls_small_cases()
+  r <- expect_no_warning(fit_predict("pls", d$y[1:10], d$ind[1:10, ], d$ind[11:12, ], FALSE, NA, 1, 20, 2, 2))
+  expect_length(r$pred, 2); expect_true(all(is.finite(r$pred)))
+  rf <- expect_no_warning(fit_predict("pls", d$yc[1:10], d$ind[1:10, ], d$ind[11:12, ], TRUE, 3L, NA, 20, 2, 2))
+  expect_length(rf$pred, 2); expect_true(all(rf$pred %in% 1:3))
+})
+
+test_that("pls works with a duplicated predictor column", {
+  skip_if_not_installed("mixOmics")
+  d <- pls_small_cases()
+  r <- expect_no_warning(fit_predict("pls", d$y[1:10], d$dup[1:10, ], d$dup[11:12, ], FALSE, NA, 1, 20, 2, 3))
+  expect_length(r$pred, 2); expect_true(all(is.finite(r$pred)))
+  rf <- expect_no_warning(fit_predict("pls", d$yc[1:10], d$dup[1:10, ], d$dup[11:12, ], TRUE, 3L, NA, 20, 2, 3))
+  expect_length(rf$pred, 2); expect_true(all(rf$pred %in% 1:3))
+})
+
+test_that("only the mixOmics few-samples advisory is muffled; other warnings pass", {
+  expect_no_warning(pls_quiet(warning("At least one study has less than 5 samples, mean centering might not do as expected")))
+  expect_warning(pls_quiet(warning("something else")), "something else")
 })

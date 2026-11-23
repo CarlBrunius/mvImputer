@@ -43,13 +43,19 @@ BACKENDS <- c("ranger", "randomForest", "pls")
 # is muffled; any other warning still reaches the caller.
 RF_FEW_VALUES_MSG <- "five or fewer unique values"
 
+# mixOmics warns "At least one study has less than 5 samples, mean centering might not do
+# as expected" when a PLS is fitted or predicted on 2-4 rows. Centring 2-4 rows is still
+# ordinary centring and spec 5.1 allows such training sets, so this one advisory message
+# is muffled; any other mixOmics warning still reaches the caller.
+PLS_FEW_SAMPLES_MSG <- "less than 5 samples, mean centering"
+
 # --- fit_predict ----------------------------------------------------------------
 
 #' Fit one target and predict the rows to impute
 #'
 #' Order of operations per fit (each step is a named object a reader can print):
 #' validate; drop zero-variance predictors; no predictor left -> mean / mode fallback;
-#' cap `mtry` and `nComp`; factor target -> relabel to the observed levels; fit and
+#' cap `mtry` and `nComp` (PLS: at the training rank); factor target -> relabel to the observed levels; fit and
 #' predict with the backend; map class scores back to codes in `1..n_levels`.
 #'
 #' Failure states: a non-finite prediction is an error (never "converged"); a missing
@@ -105,6 +111,19 @@ fit_predict <- function(method, y, x_train, x_pred, is_factor, n_levels, scale,
   colnames(x_train) <- colnames(x_pred) <- paste0("p", seq_len(ncol(x_train)))
   mtry  <- min(mtry, ncol(x_train))
   nComp <- min(nComp, ncol(x_train))
+  if (method == "pls") {
+    # PLS cannot extract more components than the rank of the CENTRED training
+    # predictors: mixOmics 6.36 stops with "system is computationally singular" in
+    # predict() otherwise. Rank-deficiency arises with two complementary indicator
+    # columns of a 2-level factor, a duplicated predictor, or n_train <= ncol (rank is
+    # at most n_train - 1 after centring). Capping at the rank loses no information:
+    # components beyond it are numerically empty.
+    rank <- qr(sweep(x_train, 2L, colMeans(x_train)))$rank
+    # Rank 0 (predictors constant up to numerical tolerance): no model to fit, so the
+    # training mean / mode is predicted, as when no predictor survives the variance drop.
+    if (rank == 0L) return(fallback_prediction(y, nrow(x_pred), is_factor, n_levels))
+    nComp <- max(1L, min(nComp, rank))
+  }
 
   if (!is_factor) {
     res <- switch(method,
@@ -214,8 +233,10 @@ rf_factor <- function(y_obs, x_train, x_pred, ntree, mtry) {
   # Vote fractions, argmax taken by argmax_first(): the class with the most votes, ties
   # to the first level, no RNG draw.
   scores <- stats::predict(fit, newdata = x_pred, type = "prob")
+  # BLOCKING: score columns must follow the level order, or argmax picks the wrong class.
   stopifnot(identical(colnames(scores), as.character(lev)))
-  list(scores = unname(scores), oob = unname(fit$err.rate[ntree, "OOB"]))
+  list(scores = unname(scores),
+       oob = finite_or_na(unname(fit$err.rate[ntree, "OOB"])))
 }
 
 # --- mixOmics PLS ---------------------------------------------------------------------
@@ -223,14 +244,23 @@ rf_factor <- function(y_obs, x_train, x_pred, ntree, mtry) {
 # mixOmics::predict() returns an array [rows, response columns, components]. Taking the
 # slice for `nComp` components with drop = FALSE keeps the row dimension when only one
 # row is predicted (otherwise mixOmics collapses it to a vector).
+# Only the few-samples advisory is muffled (see PLS_FEW_SAMPLES_MSG).
+pls_quiet <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    if (grepl(PLS_FEW_SAMPLES_MSG, conditionMessage(w), fixed = TRUE))
+      invokeRestart("muffleWarning")
+  })
+}
+
 pls_scores <- function(fit, x_pred, nComp) {
-  arr <- stats::predict(fit, newdata = x_pred)$predict
+  arr <- pls_quiet(stats::predict(fit, newdata = x_pred))$predict
   matrix(arr[, , nComp, drop = FALSE], nrow = dim(arr)[1L])
 }
 
 pls_numeric <- function(y, x_train, x_pred, nComp) {
-  fit <- mixOmics::pls(X = x_train, Y = matrix(y, ncol = 1L, dimnames = list(NULL, "y")),
-                       ncomp = nComp, mode = "regression", scale = TRUE)
+  fit <- pls_quiet(mixOmics::pls(X = x_train,
+                                 Y = matrix(y, ncol = 1L, dimnames = list(NULL, "y")),
+                                 ncomp = nComp, mode = "regression", scale = TRUE))
   list(pred = pls_scores(fit, x_pred, nComp)[, 1L], oob = NA_real_)
 }
 
@@ -240,8 +270,8 @@ pls_factor <- function(y_obs, x_train, x_pred, nComp) {
   # at least two levels are observed.
   Y <- outer(y_obs, seq_len(K), "==") + 0
   colnames(Y) <- paste0("c", seq_len(K))
-  fit <- mixOmics::pls(X = x_train, Y = Y, ncomp = nComp, mode = "regression",
-                       scale = TRUE)
+  fit <- pls_quiet(mixOmics::pls(X = x_train, Y = Y, ncomp = nComp,
+                                 mode = "regression", scale = TRUE))
   list(scores = pls_scores(fit, x_pred, nComp), oob = NA_real_)
 }
 
