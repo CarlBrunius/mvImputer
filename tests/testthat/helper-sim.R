@@ -26,11 +26,11 @@ SIM_RNG_NORMAL_KIND <- "Inversion"
 SIM_RNG_SAMPLE_KIND <- "Rejection"
 
 # sim_seeded: evaluate `code` under a scoped seed and the pinned RNG kinds, then
-# restore the caller's kinds and .Random.seed. The kinds are restored explicitly
-# because withr 3.0.3 restores .Random.seed but not the kind: RNGkind() would keep
-# reporting the pinned kind, and a caller with no .Random.seed would silently lose
-# its kind. Order matters: RNGkind() is reset INSIDE with_seed (it rescrambles the
-# scratch seed, which is discarded); withr then puts the caller's seed back.
+# restore the caller's kinds and .Random.seed. withr restores the caller's kind only
+# when a .Random.seed exists; a caller with none keeps the pinned kind, so the kind
+# is restored here explicitly. Order matters: RNGkind() is reset INSIDE with_seed (it
+# rescrambles the scratch seed, which is discarded); withr then puts the caller's
+# seed back.
 # `code` is a promise from the calling helper, so its assignments land there.
 sim_seeded <- function(seed, code) {
   force(seed)
