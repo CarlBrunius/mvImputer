@@ -5,3 +5,5 @@ dev/logs/*.log
 .Rhistory
 *.tar.gz
 *.Rcheck/
+bench/output/*
+!bench/output/*.md
