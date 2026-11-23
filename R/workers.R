@@ -13,7 +13,8 @@
 #   NULL, active plan not sequential -> use it, leave it in place (the user chose it)
 #   NULL, plan sequential            -> multisession with k = min(8, availableCores() - 1)
 #                                       workers if k >= 2, else stay sequential
-#   1                                -> sequential for the call
+#   1                                -> sequential for the call; an active worker pool is shut
+#                                       down for it and restarted when the call exits
 #   k > 1                            -> multisession with k workers for the call
 # future cannot tell "never set" from "explicitly sequential", so users who want serial
 # pass workers = 1. Multisession on every OS: forking is unavailable on Windows and
@@ -26,7 +27,8 @@
 MAX_AUTO_WORKERS <- 8L
 
 local_workers <- function(workers, envir = parent.frame()) {
-  if (!is.null(workers) && !is_whole(workers, 1)) {                       # BLOCKING
+  # The upper bound keeps as.integer() below from turning e.g. 3e9 into NA with a warning.
+  if (!is.null(workers) && !(is_whole(workers, 1) && workers <= .Machine$integer.max)) {  # BLOCKING
     stop("workers must be NULL or a whole number >= 1", call. = FALSE)
   }
 

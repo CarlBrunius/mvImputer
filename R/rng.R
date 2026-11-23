@@ -9,6 +9,12 @@
 #   streams <- make_streams(seed, n_stage, n_col)        # streams[[stage]][[col]]
 #   st      <- stream_for_iteration(streams[[s]][[j]], iter, crn)
 #   local_rng_guard()    # at the top of any function that touches the RNG
+# Caller order (mvImpute()): seed <- resolve_seed(seed); local_rng_guard(); local_workers(w).
+#   resolve_seed() comes first so the one draw seed = NULL costs is made before the guard
+#   records the state, i.e. survives the restore. local_workers() comes after the guard so
+#   the plan teardown (a deferred call) runs inside the guarded window and the guard puts
+#   .Random.seed back last. Never a plain on.exit() (without add = TRUE) in the same
+#   function: it silently replaces the withr defers and drops these restores.
 # Dependencies: parallel (nextRNGStream / nextRNGSubStream, the L'Ecuyer machinery);
 #   withr (scoped restore of .Random.seed, including its absence).
 #

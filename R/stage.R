@@ -13,6 +13,8 @@
 #   res <- run_stage(W, enc, scales, streams[[s]], tol[s], maxIter[s], method,
 #                    ntree, mtry, nComp, forceZero)
 #   res$W; res$iterations; res$not_converged; res$oob
+# RNG: run_stage() advances the caller's .Random.seed (future_lapply does, even with
+#   pre-generated seeds), so its caller must hold local_rng_guard().
 # Dependencies: future.apply (future_lapply with a list of per-job seeds: the only way to
 #   give each job its own pre-generated stream whatever the worker count); R/encode.R,
 #   R/converge.R, R/rng.R, R/backends.R.

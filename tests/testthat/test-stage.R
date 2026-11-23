@@ -16,8 +16,10 @@ test_that("a stage gives identical results with 1 and 2 workers", {
   X <- punch_holes(sim_numeric(60, 8, seed = 1), 0.1, "mcar", seed = 2)
   enc <- encode_input(X, NULL); W0 <- first_guess(enc$W, enc, "minVar")
   st <- make_streams(11L, 1L, ncol(W0))[[1]]; s <- col_scales(enc$W, enc$miss, enc$type)
-  run <- function(k) { future::plan(future::multisession, workers = k); on.exit(future::plan(future::sequential))
-    run_stage(W0, enc, s, st, 0.05, 4L, "ranger", 50, 3, 2, FALSE) }
+  run <- function(k) {
+    old <- future::plan(future::multisession, workers = k); withr::defer(future::plan(old))
+    run_stage(W0, enc, s, st, 0.05, 4L, "ranger", 50, 3, 2, FALSE)
+  }
   expect_identical(run(1), run(2))
 })
 test_that("factors with informative predictors converge without oscillating", {

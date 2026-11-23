@@ -83,7 +83,8 @@ test_that("an error exit restores the plan, .Random.seed and RNGkind()", {
 })
 
 test_that("local_workers rejects anything but NULL or a whole number >= 1", {
-  for (bad in list(0, -1, 1.5, NA, NA_integer_, Inf, "2", c(1, 2), TRUE)) {
+  # 3e9 is a whole number but not an integer: as.integer() would give NA with a warning.
+  for (bad in list(0, -1, 1.5, NA, NA_integer_, Inf, "2", c(1, 2), TRUE, 3e9)) {
     expect_error(local_workers(bad), "workers must be NULL or a whole number >= 1",
                  info = deparse(bad))
   }
