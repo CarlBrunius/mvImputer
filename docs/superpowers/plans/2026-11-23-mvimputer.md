@@ -139,7 +139,7 @@ Review tier: **light**.
   Constraints (`Depends: R (>= 4.1.0)`, `Config/testthat/edition: 3`, `Encoding: UTF-8`,
   `BugReports: https://github.com/CarlBrunius/mvImputer/issues`). LICENSE in the CRAN MIT
   template: `YEAR: 2026` / `COPYRIGHT HOLDER: Carl Brunius`. `.Rbuildignore`: `^bench$`,
-  `^dev$`, `^docs$`, `^\.git`, `^.*\.Rproj$`, `^NOTES.*\.md$`. `.gitignore` (append):
+  `^dev$`, `^docs$`, `^\.git`, `^.*\.Rproj$`, `^NOTES.*\.md$`, `^\.push-policy$`. `.gitignore` (append):
   `dev/logs/*.log`, `.Rhistory`.
 
 - [ ] **Step 2: Write the failing tests** in `tests/testthat/test-helpers.R`:
