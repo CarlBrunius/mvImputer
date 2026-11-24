@@ -5,8 +5,12 @@ Version: 0.1.0
 Authors@R: person("Carl", "Brunius", email = "carl.brunius@gmail.com",
     role = c("aut", "cre"))
 Description: Imputes missing values in numeric and mixed-type tables
-    (numeric, integer, factor, ordered, character and logical columns) with
-    iterative random-forest models, with scoped random-number handling.
+    (numeric, integer, factor, ordered, character and logical columns).
+    Each column with gaps is predicted from all the others by an iterative
+    random-forest or partial least squares model, in two stages with a
+    stopping rule scaled by the standard deviation of each column. Results are
+    reproducible for a given seed whatever the number of parallel workers,
+    and the caller's random-number state is left untouched.
 License: MIT + file LICENSE
 Depends: R (>= 4.1.0)
 Imports: future, future.apply, ranger, randomForest, stats, parallel, withr
