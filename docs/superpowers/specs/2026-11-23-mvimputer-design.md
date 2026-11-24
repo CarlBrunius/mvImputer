@@ -262,7 +262,7 @@ Per cell, per stage, over the cells still iterating:
 
 ### 5.5 Seeding
 
-- From `seed`, generate one L'Ecuyer-CMRG stream per **(stage, original column)** with
+- From `seed`, generate one L'Ecuyer-CMRG stream per **(stage, position among the non-excluded columns)** with
   `parallel::nextRNGStream`. The caller's RNG kind and `.Random.seed` are saved on entry and
   restored on exit (`on.exit`), including when `.Random.seed` did not exist. This is required, not
   optional: verified that `future_lapply` with a list of seeds still advances the caller's

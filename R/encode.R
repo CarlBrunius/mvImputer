@@ -21,9 +21,9 @@
 #   class    original class: numeric, integer, factor, ordered, character, logical.
 #   levels   named list (factor-like columns only) of the full level set, as character.
 #   constant names of columns whose observed values are all equal.
-#   exclude  excluded names.   X  the input, kept for decoding.
-#   colnames internal names (V1..Vp for an unnamed matrix); had_names: logical.
-#   keep     positions in X of the p non-excluded columns. Added to the plan's model:
+#   X        the input, kept for decoding.
+#   colnames internal names (V1..Vp for an unnamed matrix).
+#   keep    positions in X of the p non-excluded columns. Added to the plan's model:
 #            first_guess() needs the position, not the name, to read a user guess table,
 #            because names can repeat in a data.frame and are absent in a matrix.
 #
@@ -31,7 +31,8 @@
 # encode_input(). They are not in W, miss or D, and decode_output() starts from a copy
 # of X, so they come back untouched, gaps included.
 #
-# Names and row names: column names must be unique (check_input() refuses duplicates), so
+# Names and row names: column names must be unique and non-empty (check_input() refuses
+# duplicates, "" and NA), so
 # enc$constant and enc$levels are looked up by name. W, miss and D carry ROW names (X's own,
 # else "1".."n"): a matrix with only column names returns NAMED scalars from W[i, "col"].
 # Traps: W[rows, k] is a named vector (use unname() before identical()); which(arr.ind = TRUE)
@@ -74,9 +75,7 @@ encode_input <- function(X, exclude = NULL) {
   list(W = W, miss = miss, type = unname(type),
        class = unname(vapply(cols, `[[`, "", "class")),
        levels = lvls, constant = labels[keep][is_const],
-       exclude = if (is.null(exclude)) character(0) else exclude,
-       X = X, colnames = labels[keep],
-       had_names = !is.null(colnames(X)), keep = keep)
+       X = X, colnames = labels[keep], keep = keep)
 }
 
 # One column -> list(w = numeric vector, class, type, levels). The level set is fixed here
@@ -196,9 +195,11 @@ numeric_total_min <- function(enc) {
   if (length(vals)) min(vals) else NA_real_
 }
 
-# Most frequent code; which.max() returns the first maximum, i.e. the lowest code on ties.
-mode_code <- function(codes) {
-  which.max(tabulate(codes, nbins = max(codes)))
+# Most frequent code; which.max() returns the first maximum, i.e. the lowest code on ties
+# (the spec's "ties: first level"; no RNG draw). Shared with the backends' fallback
+# (R/backends.R), so the first guess and a no-model prediction pick the same level.
+mode_code <- function(codes, n_levels = max(codes)) {
+  which.max(tabulate(codes, nbins = n_levels))
 }
 
 # The user's guess for the missing cells of W column k. Errors name the column as the user

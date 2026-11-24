@@ -43,28 +43,41 @@ fmt_names <- function(x, max = NAMES_SHOWN) {
 # Row numbers where every non-excluded column is NA (NaN counts as NA, as is.na() does).
 # Used by check_input() for the warning and by mvImpute() for the diagnostics list, so
 # both always agree on what "no observed value" means.
+# Column by column, never is.na(X): is.na() of a data frame expands a matrix column into
+# several columns, so an index over X's columns no longer lines up with its result (it was
+# recycled, and an excluded matrix column decided the answer). Excluded columns are not read.
 rows_without_observed <- function(X, exclude = NULL) {
-  keep <- !(col_labels(X) %in% exclude)
-  observed <- !is.na(X)                     # logical matrix for matrix and data.frame
-  unname(which(rowSums(observed[, keep, drop = FALSE]) == 0))
+  keep <- which(!(col_labels(X) %in% exclude))
+  observed <- do.call(cbind, lapply(keep, function(j) {
+    as.matrix(!is.na(if (is.data.frame(X)) X[[j]] else X[, j]))
+  }))
+  unname(which(rowSums(observed) == 0))
 }
 
 # --- check_input ----------------------------------------------------------------
 # Order matters: structural errors first (so later checks can assume a table of at
 # least 2 supported columns), argument errors next, warnings last (an error pre-empts
-# a warning). `mtry` NULL means "not supplied"; the others are always checked, because
-# a malformed nComp that happens to be unused by this method is still a malformed call.
+# a warning). Every tuning argument is checked, because a malformed nComp that happens to
+# be unused by this method is still a malformed call.
 check_input <- function(X, exclude, tol, maxIter, method, nComp,
-                        ntree = 100L, mtry = NULL, guess = "minVar") {
+                        ntree = 100L, mtry = 5L, guess = "minVar") {
   if (!(is.data.frame(X) || is.matrix(X)))
     stop("X must be a data.frame or matrix, not ", class(X)[1], call. = FALSE)  # BLOCKING
   if (is.matrix(X) && !is.numeric(X))
     stop("A matrix X must be a numeric matrix (it is ", typeof(X),              # BLOCKING
          "); use a data.frame for mixed types", call. = FALSE)
 
-  # Names are the key of the internal data model (levels, constants, exclude); duplicates
-  # would silently mix up columns. Excluded columns count: exclude by name is ambiguous.
+  # Names are the key of the internal data model (levels, constants, exclude, oob_error);
+  # duplicates would silently mix up columns. Excluded columns count: exclude by name is
+  # ambiguous. An empty or NA name never matches in [[ ]], so it is refused too (one "" name
+  # passed the duplicate check and corrupted oob_error). A matrix with NO names is fine.
   nm <- colnames(X)
+  empty <- which(is.na(nm) | nm == "")
+  if (length(empty))
+    stop("Column names must not be empty or NA (column position(s) ",                # BLOCKING
+         paste(empty[seq_len(min(length(empty), NAMES_SHOWN))], collapse = ", "),
+         if (length(empty) > NAMES_SHOWN) ", ...", "); name every column, or for a ",
+         "matrix remove all column names", call. = FALSE)
   if (!is.null(nm) && anyDuplicated(nm))
     stop("Column names must be unique (duplicated: ", fmt_names(unique(nm[duplicated(nm)])), # BLOCKING
          "); rename them, e.g. with make.unique().", call. = FALSE)
@@ -147,10 +160,6 @@ check_columns <- function(cols) {
   invisible(NULL)
 }
 
-is_pos_whole <- function(x) {
-  is.numeric(x) && length(x) == 1L && is.finite(x) && x >= 1 && x == round(x)
-}
-
 check_tuning <- function(tol, maxIter, method, nComp, ntree, mtry) {
   if (length(tol) != length(maxIter) || length(tol) < 1L)
     stop("tol and maxIter must give one value per stage: equal length, at least 1 ",  # BLOCKING
@@ -166,12 +175,12 @@ check_tuning <- function(tol, maxIter, method, nComp, ntree, mtry) {
   if (identical(method, "pls") && !has_pkg("mixOmics"))
     stop("method = \"pls\" needs the 'mixOmics' package, which is not installed",    # BLOCKING
          call. = FALSE)
-  if (!is_pos_whole(nComp))
+  if (!is_whole(nComp, 1))
     stop("nComp must be a single positive whole number", call. = FALSE)              # BLOCKING
-  if (!is_pos_whole(ntree))
+  if (!is_whole(ntree, 1))
     stop("ntree must be a single positive whole number", call. = FALSE)              # BLOCKING
-  if (!is.null(mtry) && !is_pos_whole(mtry))
-    stop("mtry must be NULL or a single positive whole number", call. = FALSE)       # BLOCKING
+  if (!is_whole(mtry, 1))
+    stop("mtry must be a single positive whole number", call. = FALSE)               # BLOCKING
   invisible(NULL)
 }
 

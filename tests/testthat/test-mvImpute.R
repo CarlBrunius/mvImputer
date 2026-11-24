@@ -119,6 +119,50 @@ test_that("exclude is invisible under guess = 'minTotal' when the excluded colum
   expect_identical(a$y, d1$y)
 })
 
+test_that("excluded data never reach a worker", {
+  # A 4.8 MB excluded column against a 1 MB cap on what future may send to a worker: had the
+  # column (or enc, or X) been exported with a job, future would refuse to start it.
+  X <- punch_holes(sim_numeric(60, 6, seed = 1), 0.08, "mcar", seed = 2)
+  d <- data.frame(X)
+  d$big <- I(lapply(seq_len(nrow(d)), function(i) numeric(1e4)))
+  stopifnot(utils::object.size(d$big) > 4 * 1024^2)               # BLOCKING: the probe is big
+  withr::local_options(future.globals.maxSize = 1024^2)
+  out <- imp(d, exclude = "big", seed = 1, workers = 2, maxIter = c(2, 2))
+  expect_identical(attr(out, "mvImpute")$workers, 2L)
+  expect_identical(out$big, d$big)
+  expect_identical(strip(out)[colnames(X)],
+                   strip(imp(data.frame(X), seed = 1, workers = 1, maxIter = c(2, 2))))
+})
+
+test_that("caller RNG state and kind are restored at workers = 2; seed = NULL costs one draw", {
+  withr::local_seed(4, .rng_kind = "Wichmann-Hill")   # a non-default kind, so a leak shows
+  kind0 <- RNGkind(); s0 <- .Random.seed
+  imp(dh, seed = 1, workers = 2, maxIter = c(2, 2))
+  expect_identical(RNGkind(), kind0)
+  expect_identical(.Random.seed, s0)
+  s_one <- withr::with_preserve_seed({ sample.int(.Machine$integer.max, 1L); .Random.seed })
+  imp(dh, workers = 2, maxIter = c(2, 2))
+  expect_identical(.Random.seed, s_one)
+  expect_identical(RNGkind(), kind0)
+})
+
+test_that("randomForest and pls: identical with 1 and 2 workers", {
+  skip_on_cran()
+  for (m in c("randomForest", "pls")) {
+    if (m == "pls") skip_if_not_installed("mixOmics")
+    a <- imp(dh, method = m, seed = 1, workers = 1, maxIter = c(2, 3))
+    b <- imp(dh, method = m, seed = 1, workers = 2, maxIter = c(2, 3))
+    expect_identical(strip(a), strip(b), info = m)
+    expect_identical(attr(a, "mvImpute")$oob_error, attr(b, "mvImpute")$oob_error, info = m)
+  }
+})
+
+test_that("an empty column name is refused before any work", {
+  X <- punch_holes(sim_numeric(40, 4, seed = 1), 0.1, "mcar", seed = 2)
+  colnames(X)[3] <- ""
+  expect_error(mvImpute(X, seed = 1, workers = 1), "Column names must not be empty or NA")
+})
+
 test_that("numeric matrix input: class, dimnames and diagnostics", {
   X <- punch_holes(sim_numeric(60, 8, seed = 1), 0.05, "mcar", seed = 2)
   out <- imp(X, seed = 1, workers = 1, maxIter = c(3, 5))

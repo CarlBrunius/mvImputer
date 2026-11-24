@@ -25,10 +25,14 @@ First release. `mvImpute()` continues the `mvImp()` / `mvImpWrap()` imputer of S
   a missing row swing between about 1 and about 0 on alternate iterations and never settle. In
   a simulation (n = 300, 3-level factor, 45 rows missing) decoded accuracy was 0.58 with
   siblings as predictors against 0.82 without. Factors are now handled directly: each factor
-  is one imputation target and its own indicator columns are never its predictors. Analyses
-  that one-hot encoded factors and imputed them with the old engine probably got near-random
-  factor imputations and should be re-run. Exact linear dependencies among numeric columns that
-  the user supplies still can cause the oscillation; this is documented under "Assumptions".
+  is one imputation target and its own indicator columns are never its predictors. How much
+  the old one-hot route cost depends on the data: in the simulated mixed table of the
+  calibration (`bench/output/calibration.md`) the old engine's factor accuracy was 0.836
+  against 0.861 for the new one (5 replicates, factor, ordered, character and logical
+  columns pooled). Analyses that one-hot encoded factors for the old engine may therefore have
+  somewhat less accurate factor imputations; re-running them is worth considering. Exact
+  linear dependencies among numeric columns that the user supplies still can cause the
+  oscillation; this is documented under "Assumptions".
 * **Housekeeping (F4).** Progress goes through `message()` (silenceable), not `cat()`;
   `options(warn = -1)` is no longer set globally; there is no `library()` call inside
   functions; all dependencies are declared in `DESCRIPTION`; ranger runs with one thread per
@@ -48,8 +52,9 @@ where nothing else changed.
   still accepted.
 * `method = "ranger"` (default), `"randomForest"` or `"pls"`, replacing `method` plus `rfMeth`;
   the Rborist backend is dropped.
-* `workers` replaces `nCore`: parallelism through `future` / `future.apply`; an active
-  `future::plan()` is used and left in place.
+* `workers` replaces `nCore`: parallelism through `future` / `future.apply`. With
+  `workers = NULL` an active non-sequential `future::plan()` is used and left in place; with
+  a number of workers the caller's plan is replaced for the call and restored on exit.
 * `exclude`: columns passed through untouched (identifiers, the outcome); never predictors,
   never imputed, gaps kept.
 * `attr(out, "mvImpute")`: seed, settings, iterations and time per stage, the cells not
@@ -61,16 +66,20 @@ where nothing else changed.
 
 ## Speed against StatTools 0.0.917
 
-Simulated data, same number of workers, one run each (`bench/output/benchmark.md` in the
-repository). The old engine ran two ranger threads in each worker and the new one runs one.
+Simulated data, same number of workers, one run each, `method = "ranger"` only
+(`bench/output/benchmark.md` in the repository). The old engine ran two ranger threads in each
+worker and the new one runs one.
 
 * Numeric tables (200 x 1000, 5 % gaps): wall time new/old 0.36 to 0.54, because the new
-  engine stopped after 11 to 14 iterations while the old one ran to its cap of 75.
+  engine stopped after 11 to 14 iterations while the old one ran to its cap of 75. Time per
+  iteration was 2.4 to 2.9 times the old engine's, so the gain comes only from stopping early.
 * Small mixed table (900 x 20, one-hot route for the old engine): 1.53 to 1.92, both engines at
   75 iterations. Higher cost per iteration, possibly from single-thread forests and dispatch
   overhead (a hypothesis).
 
 ## Default settings (decided 2026-11-24, from simulation)
+
+All evidence in this section, and the speed figures above, come from `method = "ranger"`.
 
 * `tol = c(0.05, 0.025)` stays the default. Over a grid of 12 tolerance pairs on simulated
   omics-like data (random and left-censored gaps) and a mixed covariate table, imputation
@@ -79,21 +88,39 @@ repository). The old engine ran two ranger threads in each worker and the new on
   its iteration count did not narrow the choice.
 * Common random numbers stay on: within a stage, each column reuses one random stream in
   every iteration. Compared with fresh random numbers per iteration, this gave a 0.4 %
-  higher SD-scaled RMSE with about 6 times fewer iterations, and fewer label cycles in a test
-  with two associated factors missing in the same rows (final stage at its cap in 1 of 20
-  runs, against 6 of 20).
+  higher SD-scaled RMSE and a 1.8 % higher raw RMSE (higher in 5 of 5 seeds;
+  `bench/output/experiments.md`) with about 6 times fewer iterations, and fewer label cycles
+  in a test with two associated factors missing in the same rows (final stage at its cap in
+  1 of 20 runs, against 6 of 20).
+* With `method = "randomForest"` common random numbers do not keep the predictions stable
+  between iterations (a small change in the data re-randomises most of the forest), so runs
+  often reach `maxIter`. In one check (200 x 100, 5 % random gaps, 3 runs) it ran 15 + 60,
+  15 + 43 and 15 + 44 iterations against 5 or 6 + 6 for ranger, about 5 times the run time.
 
 ## Known limitations
 
-* On tables with factor-like columns the final stage often reaches `maxIter`, because
-  predicted factor levels can cycle between iterations, so the "not converged" warning is
-  common there (54 of 60 simulated runs on a mixed table). The cells concerned are listed in
-  `attr(out, "mvImpute")$not_converged`. To be revisited after first real use.
+* On tables with factor-like columns the final stage often reaches `maxIter`, so the "not
+  converged" warning is common there (54 of 60 simulated runs on a mixed table). The cells
+  left are mostly numeric (10 of 11, 7 of 9 and 15 of 16 in three simulated runs), and the
+  same tables without their factor-like columns converged. The likely cause is factor levels
+  that change between iterations and so change the other columns' predictors, but this is
+  not proven. The cells concerned are listed in `attr(out, "mvImpute")$not_converged`. To be
+  revisited after first real use.
+* Gaps below a detection limit are missing not at random, and the forest backends impute
+  them too high: they cannot predict below the observed range. In a check (200 x 100, the
+  lowest 5 % of each column missing, 3 replicates) every imputed value lay above the truth,
+  and leaving the column minimum in place was much closer to the truth (SD-scaled RMSE about
+  0.06 against 0.44). That is one simulated setting, the one most favourable to a minimum
+  fill. `guess` hardly changes the result (0.442 with `"minVar"` against 0.443 with
+  `"median"`). `method = "pls"` is linear and can extrapolate below the observed range,
+  including to negative values on untransformed intensities (57 % of its imputations in one
+  such simulation); no report evaluates PLS.
 * On simulated left-censored data (200 x 500, 5 % of the lowest values missing; 5 replicates)
   the raw RMSE of `mvImpute()` with the default `tol` was 2.7 % higher than that of StatTools
   0.0.917 (mean 0.593 against 0.578), higher in every replicate, while the SD-scaled RMSE was
   equal (0.494 against 0.492); a smaller `tol` did not close the gap (0.595 at
   `tol = c(0.025, 0.005)`). In one larger run (200 x 1000) the gap was 7 % to 9 %, and in a
   decomposition of that data set a few cells in the highest-SD, heavy-tailed columns carried
-  most of it. Single runs of the old engine vary by about 10 % in raw RMSE. The cause is not
-  established.
+  most of it. One repeat run of the old engine on the random-gap benchmark table moved its
+  raw RMSE from 1.98 to 2.18 (about 10 %), so single-run raw RMSE comparisons are weak. The
+  cause is not established.

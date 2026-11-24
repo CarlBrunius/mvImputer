@@ -1,3 +1,6 @@
+# test-encode.R -- encode_input(), design_matrix(), first_guess() and decode_output(): the
+# internal data model and its lossless round trip (spec sections 5.1, 5.2). No workers.
+
 test_that("encode then decode returns the input unchanged, gaps included", {
   d <- sim_mixed(200, seed = 1)
   d$int1 <- as.numeric(d$int1)              # integer-with-gaps returns double by design

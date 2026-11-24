@@ -49,7 +49,7 @@ col_scales <- function(W, miss, type) {
   stopifnot(is.matrix(W), is.matrix(miss), identical(dim(W), dim(miss)),
             length(type) == ncol(W))
   out <- vapply(seq_len(ncol(W)), function(j) {
-    if (!identical(type[[j]], "numeric")) return(NA_real_)
+    if (!identical(type[[j]], TYPE_NUMERIC)) return(NA_real_)
     x <- W[!miss[, j], j]
     # stats::sd() is NA for a single value; a single observation has no spread, so 0.
     if (length(x) < 2L) 0 else stats::sd(x)
@@ -99,9 +99,9 @@ converge_cells <- function(old, new, prev_same, scale, is_factor, tol) {
   # make `converged` NA. Factor cells never use their scale.
   sc <- scale[!is_factor]
   if (!all(is.finite(sc) & sc > 0)) {
-    stop("numeric cell with a missing, non-finite or non-positive scale; spec section ",
-         "5.1 guarantees a positive scale for every imputed numeric column, so the ",
-         "column filter upstream failed", call. = FALSE)
+    stop("internal error: numeric cell with a missing, non-finite or non-positive scale ",
+         "(constant columns and columns with fewer than 2 observed values should never ",
+         "reach the stopping rule)", call. = FALSE)
   }
 
   same <- new == old

@@ -24,7 +24,7 @@ test_that("make_streams is deterministic, distinct and L'Ecuyer", {
 })
 
 test_that("make_streams leaves the caller's RNG exactly as it was", {
-  set.seed(1); s0 <- .Random.seed
+  withr::local_seed(1, .rng_kind = "Mersenne-Twister"); s0 <- .Random.seed
   make_streams(42L, 2L, 3L)
   expect_identical(.Random.seed, s0); expect_identical(RNGkind()[1], "Mersenne-Twister")
 })
@@ -64,7 +64,7 @@ test_that("an absent .Random.seed with a non-default kind keeps that kind", {
 })
 
 test_that("local_rng_guard restores seed and kind on an error exit", {
-  set.seed(5); s0 <- .Random.seed; k0 <- RNGkind()
+  withr::local_seed(5); s0 <- .Random.seed; k0 <- RNGkind()
   f <- function() {
     local_rng_guard()
     suppressWarnings(RNGkind("L'Ecuyer-CMRG", "Inversion", "Rejection"))
@@ -105,12 +105,13 @@ test_that("make_streams validates its arguments", {
 })
 
 test_that("resolve_seed(NULL) follows set.seed and costs exactly one draw", {
-  set.seed(7); a <- resolve_seed(NULL); s1 <- .Random.seed
-  set.seed(7); b <- resolve_seed(NULL)
+  # Each draw runs in its own scoped seed: value and the state it leaves behind.
+  draw <- function() withr::with_seed(7, list(value = resolve_seed(NULL), state = .Random.seed))
+  a <- draw(); b <- draw()
   expect_identical(a, b)
-  expect_true(is.integer(a) && length(a) == 1L)
-  set.seed(7); sample.int(.Machine$integer.max, 1L)
-  expect_identical(s1, .Random.seed)
+  expect_true(is.integer(a$value) && length(a$value) == 1L)
+  one_draw <- withr::with_seed(7, { sample.int(.Machine$integer.max, 1L); .Random.seed })
+  expect_identical(a$state, one_draw)
 })
 
 test_that("resolve_seed returns a valid seed as integer and rejects the rest", {

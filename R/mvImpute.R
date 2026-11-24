@@ -56,10 +56,20 @@
 #'   holds out, informs every imputed value. Downstream cross-validated or test-set
 #'   performance is therefore optimistic, more so if the outcome is a column of `X`. Leave
 #'   the outcome out of `X`, or pass it in `exclude`: excluded columns are returned
-#'   unchanged (gaps stay gaps), are never predictors and are never imputed.
+#'   unchanged (gaps stay gaps), are never predictors and are never imputed. `exclude`
+#'   covers only the columns it names: a copy or a derived version of the outcome left in
+#'   `X` still informs every model. `mvImpute()` cannot fit on training rows and apply the
+#'   fit to test rows; to keep a test set untouched, impute it in a separate call.
 #' * **Missing at random.** The models assume that values are missing at random given the
 #'   other columns. Values missing because they are below a detection limit (missing not
-#'   at random) are imputed too high: forests cannot predict below the observed range.
+#'   at random) are imputed too high by the forest backends, which cannot predict below the
+#'   observed range. In a simulation where the lowest 5 % of each column were missing, all
+#'   forest imputations lay above the true values, and leaving the column minimum in place
+#'   was much closer to the truth (SD-scaled RMSE about 0.06 against 0.44). That is one
+#'   simulated setting, the one most favourable to a minimum fill. `method = "pls"` is
+#'   linear and can extrapolate below the observed range, including to negative values on
+#'   untransformed intensities (57 % of its imputations in one such simulation); no report
+#'   evaluates PLS.
 #' * **Single imputation.** The result is one deterministic completed table. Downstream
 #'   standard errors that treat imputed values as observed are too small.
 #' * **Linear dependencies.** Exact linear dependencies among numeric columns that you
@@ -68,9 +78,11 @@
 #'   safely.
 #'
 #' @section Choosing `guess`:
-#' `"minVar"` (the default) starts each numeric gap at the column minimum, which suits
-#' omics intensities with detection-limit gaps. For a covariate table (clinical or
-#' questionnaire variables) use `guess = "median"`. `"minTotal"` starts every numeric gap
+#' `guess` sets only the starting values, which the iterations replace: the final values
+#' hardly depend on it (SD-scaled RMSE 0.442 with `"minVar"` against 0.443 with `"median"`
+#' in a simulation with detection-limit gaps). `"minVar"` (the default) starts each numeric
+#' gap at the column minimum. For a covariate table (clinical or questionnaire variables)
+#' `guess = "median"` is the natural start. `"minTotal"` starts every numeric gap
 #' at the smallest observed value over all numeric columns. A matrix or data frame of the
 #' shape of `X` supplies a start per cell; it is read only at the missing cells of numeric
 #' columns, where it must be a finite number. Factor-like columns always start at their
@@ -80,8 +92,9 @@
 #' * An integer matrix with gaps is returned as a double matrix (a matrix has one storage
 #'   type). An integer column of a data frame comes back as double if it had gaps and as
 #'   integer if it had none; imputed values are not rounded.
-#' * Column names must be unique (duplicates are refused). Matrices without column names
-#'   are reported as `V1`, `V2`, ... in messages and diagnostics, and returned without them.
+#' * Column names must be unique and non-empty (duplicated, `""` and `NA` names are
+#'   refused). Matrices without any column names are reported as `V1`, `V2`, ... in
+#'   messages and diagnostics, and returned without them.
 #' * A column whose observed values are all equal is filled with that value (with a
 #'   message) and is not a target.
 #' * With `method = "pls"`, "most likely level" means the largest predicted indicator
@@ -92,13 +105,22 @@
 #' * `oob_error` is estimated on observed rows, so when the gaps are not missing at
 #'   random it overstates how well the imputed values can be predicted.
 #' * Known limitation: on tables with factor-like columns the final stage often reaches
-#'   `maxIter`, because predicted factor levels can cycle between iterations, so the "not
-#'   converged" warning is common there. The cells concerned are listed in the
-#'   diagnostics' `not_converged`.
+#'   `maxIter` (54 of 60 simulated runs on a mixed table), so the "not converged" warning
+#'   is common there. The cells left are mostly numeric (10 of 11, 7 of 9 and 15 of 16 in
+#'   three simulated runs), and the same tables without their factor-like columns
+#'   converged. The likely cause is factor levels that change between iterations and so
+#'   change the other columns' predictors, but this is not proven. The cells concerned are
+#'   listed in the diagnostics' `not_converged`.
 #'
 #' @param X A data frame or a numeric matrix. The same class is returned.
 #' @param method `"ranger"` (default), `"randomForest"`, or `"pls"` (needs the
-#'   `mixOmics` package).
+#'   `mixOmics` package). The default `tol`, the use of common random numbers (each column
+#'   reuses one random stream in every iteration of a stage) and the speed figures in NEWS
+#'   were evaluated with `"ranger"` only. With `"randomForest"`, common random numbers do
+#'   not keep the predictions stable between iterations, so runs often reach `maxIter`: in
+#'   one check (200 x 100, 5 % random gaps, 3 runs) it ran 15 + 60, 15 + 43 and 15 + 44
+#'   iterations against 5 or 6 + 6 for ranger, about 5 times the run time. No report
+#'   evaluates `"pls"`.
 #' @param exclude Character vector of column names that are passed through untouched
 #'   (identifiers, the outcome). The checks on column values and types skip them; the
 #'   checks that column names are unique, that `X` is a data frame or numeric matrix and
@@ -113,7 +135,8 @@
 #'   workers. The previous plan is restored on exit.
 #' @param tol Numeric vector, one value per stage: the convergence tolerance as a
 #'   fraction of the standard deviation of the observed values of each numeric column.
-#'   The defaults were chosen by simulation.
+#'   The defaults were kept after a simulation, with `method = "ranger"`, that found no
+#'   setting clearly better (see NEWS and `method`).
 #' @param maxIter Whole numbers, one per stage: the iteration cap of that stage.
 #'   `length(maxIter)` must equal `length(tol)`.
 #' @param guess `"minVar"`, `"median"`, `"minTotal"`, or a matrix or data frame with the
@@ -134,14 +157,15 @@
 #'   The diagnostics are in `attr(out, "mvImpute")`, a list with
 #'   * `seed`: the seed used; `rng_kind`: `"L'Ecuyer-CMRG"`; `method`;
 #'   * `settings`: list of the other arguments as given;
-#'   * `workers`: number of workers used (integer);
+#'   * `workers`: number of workers used (integer; `NA` if an active plan reports an
+#'     infinite number);
 #'   * `iterations`: iterations run per stage (integer vector);
 #'   * `not_converged`: per stage, a data frame with columns `row` (row number in `X`)
 #'     and `column` (column name) of the cells still iterating at the cap, zero rows if
 #'     none;
 #'   * `time`: elapsed seconds per stage;
-#'   * `oob_error`: named numeric, one value per imputed column, from the last fit in
-#'     the final stage. Numeric column: out-of-bag RMSE divided by the column's
+#'   * `oob_error`: named numeric, one value per imputed non-constant column, from the
+#'     last fit in the final stage (a constant column with gaps has no entry). Numeric column: out-of-bag RMSE divided by the column's
 #'     standard deviation. Factor-like column: out-of-bag misclassification rate. `NA`
 #'     for `method = "pls"`;
 #'   * `rows_no_observed`: row numbers with no observed value in the non-excluded
@@ -165,9 +189,6 @@ mvImpute <- function(X, method = c("ranger", "randomForest", "pls"), exclude = N
                      maxIter = c(15, 60), guess = "minVar", forceZero = FALSE,
                      ntree = 100, mtry = 5, nComp = 2, verbose = FALSE) {
   method <- match.arg(method)
-  # BLOCKING, and before check_input(): that function lets mtry = NULL through ("not
-  # supplied") but the backends need a number, so mvImpute() has its own single message.
-  if (!is_pos_whole(mtry)) stop("mtry must be a single positive whole number", call. = FALSE)
   flag_ok <- function(x) is.logical(x) && length(x) == 1L && !is.na(x)
   if (!flag_ok(forceZero) || !flag_ok(verbose))                                  # BLOCKING
     stop("forceZero and verbose must each be TRUE or FALSE", call. = FALSE)

@@ -33,13 +33,14 @@ attr(out, "mvImpute")$iterations   # iterations run in each stage
 ```
 
 * The same seed gives identical imputed values whatever `workers` is (same machine, same R and
-  package versions). The caller's random-number state is left as it was.
+  package versions). The caller's random-number state is restored on exit, except that
+  `seed = NULL` (the default) takes one draw from the caller's random-number stream.
 * `workers = NULL` (default) uses an active non-sequential `future::plan()` if there is one,
   otherwise starts a multisession plan for the call. `workers = 1` runs serially.
 * Leave the outcome out of `X`, or pass it in `exclude = "outcome"`: excluded columns are
   returned unchanged and never used as predictors.
-* For a covariate table (clinical or questionnaire variables) use `guess = "median"`; the
-  default `guess = "minVar"` suits omics intensities with detection-limit gaps.
+* `guess` sets only the starting values (default `"minVar"`, the column minimum; `"median"`
+  is the natural start for a covariate table). The final values hardly depend on it.
 * Diagnostics (seed, iterations per stage, cells that did not converge, out-of-bag error per
   column) are in `attr(out, "mvImpute")`. See `?mvImpute`.
 
@@ -49,10 +50,19 @@ attr(out, "mvImpute")$iterations   # iterations run in each stage
   informs every imputed value. Downstream cross-validated or test-set performance is therefore
   optimistic, more so if the outcome is a column of `X`. Leave the outcome out of `X`, or pass
   it in `exclude`: excluded columns are returned unchanged (gaps stay gaps), are never
-  predictors and are never imputed.
+  predictors and are never imputed. `exclude` covers only the columns it names: a copy or a
+  derived version of the outcome left in `X` still informs every model. `mvImpute()` cannot
+  fit on training rows and apply the fit to test rows; to keep a test set untouched, impute it
+  in a separate call.
 * **Missing at random.** The models assume that values are missing at random given the other
   columns. Values missing because they are below a detection limit (missing not at random) are
-  imputed too high: forests cannot predict below the observed range.
+  imputed too high by the forest backends, which cannot predict below the observed range. In a
+  simulation where the lowest 5 % of each column were missing, all forest imputations lay above
+  the true values, and leaving the column minimum in place was much closer to the truth
+  (SD-scaled RMSE about 0.06 against 0.44). That is one simulated setting, the one most
+  favourable to a minimum fill. `method = "pls"` is linear and can extrapolate below the
+  observed range, including to negative values on untransformed intensities (57 % of its
+  imputations in one such simulation); no report evaluates PLS.
 * **Single imputation.** The result is one deterministic completed table. Downstream standard
   errors that treat imputed values as observed are too small.
 * **Linear dependencies.** Exact linear dependencies among numeric columns that you supply (your

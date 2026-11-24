@@ -1,3 +1,6 @@
+# test-converge.R -- col_scales() and converge_cells(), the SD-scaled stopping rule
+# (spec section 5.4). Pure functions on literal vectors; no RNG, no workers.
+
 test_that("a negative cell that doubles is not converged (old rule said it was)", {
   expect_false(converge_cells(-1, -2, FALSE, 1, FALSE, 0.05)$converged)
 })
@@ -40,11 +43,11 @@ test_that("mixed numeric and factor cells are judged per type, never NA", {
   expect_identical(res$same, c(FALSE, TRUE, FALSE))
   expect_false(anyNA(res$converged))
 })
-test_that("a zero or negative scale on a numeric cell is an error (spec 5.1 invariant)", {
-  expect_error(converge_cells(5, 5, FALSE, 0, FALSE, 0.05), "section 5.1")
-  expect_error(converge_cells(0.1, sum(rep(0.1, 3)) / 3, FALSE, 0, FALSE, 0.05), "section 5.1")
-  expect_error(converge_cells(5, 5.1, FALSE, -1, FALSE, 0.05), "section 5.1")
-  expect_error(converge_cells(5, 5.1, FALSE, Inf, FALSE, 0.05), "section 5.1")
+test_that("a zero or negative scale on a numeric cell is an error (an internal invariant)", {
+  expect_error(converge_cells(5, 5, FALSE, 0, FALSE, 0.05), "non-positive scale")
+  expect_error(converge_cells(0.1, sum(rep(0.1, 3)) / 3, FALSE, 0, FALSE, 0.05), "non-positive scale")
+  expect_error(converge_cells(5, 5.1, FALSE, -1, FALSE, 0.05), "non-positive scale")
+  expect_error(converge_cells(5, 5.1, FALSE, Inf, FALSE, 0.05), "non-positive scale")
 })
 test_that("a zero scale on a factor cell is ignored", {
   expect_true(converge_cells(2, 2, TRUE, 0, TRUE, 0.05)$converged)
@@ -54,5 +57,5 @@ test_that("is_factor and prev_same must be logical, not 0/1", {
   expect_error(converge_cells(1, 1, 0, 1, FALSE, 0.05))
 })
 test_that("a numeric cell with an NA scale is an error, not a silent NA", {
-  expect_error(converge_cells(1, 2, FALSE, NA, FALSE, 0.05), "section 5.1")
+  expect_error(converge_cells(1, 2, FALSE, NA, FALSE, 0.05), "non-positive scale")
 })

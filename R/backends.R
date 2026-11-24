@@ -152,12 +152,12 @@ fit_predict <- function(method, y, x_train, x_pred, is_factor, n_levels, scale,
 
 #' Training mean (numeric) or most frequent code (factor) when no model can be fitted
 #'
-#' `which.max(tabulate())` returns the first maximum, so ties go to the lowest code,
-#' matching the spec's "ties: first level". `oob` is NA: nothing was predicted by a model.
+#' `mode_code()` (R/encode.R) gives ties to the lowest code, matching the spec's "ties:
+#' first level". `oob` is NA: nothing was predicted by a model.
 #' @noRd
 fallback_prediction <- function(y, n_pred, is_factor, n_levels) {
   if (is_factor) {
-    value <- which.max(tabulate(y, nbins = n_levels))
+    value <- mode_code(y, n_levels)
   } else {
     value <- mean(y)
   }

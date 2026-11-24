@@ -1,3 +1,7 @@
+# test-backends.R -- fit_predict() for ranger, randomForest and mixOmics PLS: predictions,
+# factor relabelling, fallbacks and the out-of-bag error (spec section 5.3). pls tests skip
+# when mixOmics is not installed. No workers.
+
 for (m in c("ranger", "randomForest", "pls")) {
   test_that(paste(m, "predicts a numeric target"), {
     if (m == "pls") skip_if_not_installed("mixOmics")

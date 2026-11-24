@@ -24,7 +24,13 @@ mvImpute(
 \item{X}{A data frame or a numeric matrix. The same class is returned.}
 
 \item{method}{\code{"ranger"} (default), \code{"randomForest"}, or \code{"pls"} (needs the
-\code{mixOmics} package).}
+\code{mixOmics} package). The default \code{tol}, the use of common random numbers (each column
+reuses one random stream in every iteration of a stage) and the speed figures in NEWS
+were evaluated with \code{"ranger"} only. With \code{"randomForest"}, common random numbers do
+not keep the predictions stable between iterations, so runs often reach \code{maxIter}: in
+one check (200 x 100, 5 \% random gaps, 3 runs) it ran 15 + 60, 15 + 43 and 15 + 44
+iterations against 5 or 6 + 6 for ranger, about 5 times the run time. No report
+evaluates \code{"pls"}.}
 
 \item{exclude}{Character vector of column names that are passed through untouched
 (identifiers, the outcome). The checks on column values and types skip them; the
@@ -43,7 +49,8 @@ workers. The previous plan is restored on exit.}
 
 \item{tol}{Numeric vector, one value per stage: the convergence tolerance as a
 fraction of the standard deviation of the observed values of each numeric column.
-The defaults were chosen by simulation.}
+The defaults were kept after a simulation, with \code{method = "ranger"}, that found no
+setting clearly better (see NEWS and \code{method}).}
 
 \item{maxIter}{Whole numbers, one per stage: the iteration cap of that stage.
 \code{length(maxIter)} must equal \code{length(tol)}.}
@@ -73,14 +80,15 @@ The diagnostics are in \code{attr(out, "mvImpute")}, a list with
 \itemize{
 \item \code{seed}: the seed used; \code{rng_kind}: \code{"L'Ecuyer-CMRG"}; \code{method};
 \item \code{settings}: list of the other arguments as given;
-\item \code{workers}: number of workers used (integer);
+\item \code{workers}: number of workers used (integer; \code{NA} if an active plan reports an
+infinite number);
 \item \code{iterations}: iterations run per stage (integer vector);
 \item \code{not_converged}: per stage, a data frame with columns \code{row} (row number in \code{X})
 and \code{column} (column name) of the cells still iterating at the cap, zero rows if
 none;
 \item \code{time}: elapsed seconds per stage;
-\item \code{oob_error}: named numeric, one value per imputed column, from the last fit in
-the final stage. Numeric column: out-of-bag RMSE divided by the column's
+\item \code{oob_error}: named numeric, one value per imputed non-constant column, from the
+last fit in the final stage (a constant column with gaps has no entry). Numeric column: out-of-bag RMSE divided by the column's
 standard deviation. Factor-like column: out-of-bag misclassification rate. \code{NA}
 for \code{method = "pls"};
 \item \code{rows_no_observed}: row numbers with no observed value in the non-excluded
@@ -116,10 +124,20 @@ were, except that \code{seed = NULL} draws exactly one integer from the caller's
 holds out, informs every imputed value. Downstream cross-validated or test-set
 performance is therefore optimistic, more so if the outcome is a column of \code{X}. Leave
 the outcome out of \code{X}, or pass it in \code{exclude}: excluded columns are returned
-unchanged (gaps stay gaps), are never predictors and are never imputed.
+unchanged (gaps stay gaps), are never predictors and are never imputed. \code{exclude}
+covers only the columns it names: a copy or a derived version of the outcome left in
+\code{X} still informs every model. \code{mvImpute()} cannot fit on training rows and apply the
+fit to test rows; to keep a test set untouched, impute it in a separate call.
 \item \strong{Missing at random.} The models assume that values are missing at random given the
 other columns. Values missing because they are below a detection limit (missing not
-at random) are imputed too high: forests cannot predict below the observed range.
+at random) are imputed too high by the forest backends, which cannot predict below the
+observed range. In a simulation where the lowest 5 \% of each column were missing, all
+forest imputations lay above the true values, and leaving the column minimum in place
+was much closer to the truth (SD-scaled RMSE about 0.06 against 0.44). That is one
+simulated setting, the one most favourable to a minimum fill. \code{method = "pls"} is
+linear and can extrapolate below the observed range, including to negative values on
+untransformed intensities (57 \% of its imputations in one such simulation); no report
+evaluates PLS.
 \item \strong{Single imputation.} The result is one deterministic completed table. Downstream
 standard errors that treat imputed values as observed are too small.
 \item \strong{Linear dependencies.} Exact linear dependencies among numeric columns that you
@@ -131,9 +149,11 @@ safely.
 
 \section{Choosing \code{guess}}{
 
-\code{"minVar"} (the default) starts each numeric gap at the column minimum, which suits
-omics intensities with detection-limit gaps. For a covariate table (clinical or
-questionnaire variables) use \code{guess = "median"}. \code{"minTotal"} starts every numeric gap
+\code{guess} sets only the starting values, which the iterations replace: the final values
+hardly depend on it (SD-scaled RMSE 0.442 with \code{"minVar"} against 0.443 with \code{"median"}
+in a simulation with detection-limit gaps). \code{"minVar"} (the default) starts each numeric
+gap at the column minimum. For a covariate table (clinical or questionnaire variables)
+\code{guess = "median"} is the natural start. \code{"minTotal"} starts every numeric gap
 at the smallest observed value over all numeric columns. A matrix or data frame of the
 shape of \code{X} supplies a start per cell; it is read only at the missing cells of numeric
 columns, where it must be a finite number. Factor-like columns always start at their
@@ -146,8 +166,9 @@ most frequent observed level (ties: the first level).
 \item An integer matrix with gaps is returned as a double matrix (a matrix has one storage
 type). An integer column of a data frame comes back as double if it had gaps and as
 integer if it had none; imputed values are not rounded.
-\item Column names must be unique (duplicates are refused). Matrices without column names
-are reported as \code{V1}, \code{V2}, ... in messages and diagnostics, and returned without them.
+\item Column names must be unique and non-empty (duplicated, \code{""} and \code{NA} names are
+refused). Matrices without any column names are reported as \code{V1}, \code{V2}, ... in
+messages and diagnostics, and returned without them.
 \item A column whose observed values are all equal is filled with that value (with a
 message) and is not a target.
 \item With \code{method = "pls"}, "most likely level" means the largest predicted indicator
@@ -158,9 +179,12 @@ non-sequential plan as it is and leaves it in place.
 \item \code{oob_error} is estimated on observed rows, so when the gaps are not missing at
 random it overstates how well the imputed values can be predicted.
 \item Known limitation: on tables with factor-like columns the final stage often reaches
-\code{maxIter}, because predicted factor levels can cycle between iterations, so the "not
-converged" warning is common there. The cells concerned are listed in the
-diagnostics' \code{not_converged}.
+\code{maxIter} (54 of 60 simulated runs on a mixed table), so the "not converged" warning
+is common there. The cells left are mostly numeric (10 of 11, 7 of 9 and 15 of 16 in
+three simulated runs), and the same tables without their factor-like columns
+converged. The likely cause is factor levels that change between iterations and so
+change the other columns' predictors, but this is not proven. The cells concerned are
+listed in the diagnostics' \code{not_converged}.
 }
 }
 

@@ -68,7 +68,7 @@ test_that("workers = NULL with one available core stays sequential (nested call)
 test_that("an error exit restores the plan, .Random.seed and RNGkind()", {
   skip_on_cran()
   future::plan(future::sequential); withr::defer(future::plan(future::sequential))
-  set.seed(11); s0 <- .Random.seed; k0 <- RNGkind()
+  withr::local_seed(11); s0 <- .Random.seed; k0 <- RNGkind()
   f <- function() {
     local_rng_guard()
     local_workers(2L)
@@ -80,6 +80,15 @@ test_that("an error exit restores the plan, .Random.seed and RNGkind()", {
   expect_true(inherits(future::plan(), "sequential"))
   expect_identical(.Random.seed, s0)
   expect_identical(RNGkind(), k0)
+})
+
+test_that("a plan that reports infinitely many workers gives NA, not a coercion warning", {
+  # Some backends (e.g. batch schedulers) report Inf; as.integer(Inf) is NA with a warning.
+  testthat::local_mocked_bindings(plan = function(...) structure(list(), class = "future_mock_plan"),
+                                  nbrOfWorkers = function(...) Inf, .package = "future")
+  n <- 0L
+  expect_no_warning(n <- local_workers(NULL))
+  expect_identical(n, NA_integer_)
 })
 
 test_that("local_workers rejects anything but NULL or a whole number >= 1", {

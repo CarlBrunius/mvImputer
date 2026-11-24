@@ -1,3 +1,7 @@
+# test-stage.R -- stage_jobs() and run_stage(): training rows, frozen cells, seeding by column,
+# worker invariance (spec sections 5.4, 5.5). The multisession tests load the INSTALLED
+# package in their workers, so run this file with load_package = 'installed'.
+
 test_that("training rows are the originally observed rows, even after freezing", {
   miss <- cbind(a = c(TRUE, TRUE, FALSE, FALSE), b = c(FALSE, TRUE, FALSE, FALSE))
   frozen <- cbind(a = c(TRUE, FALSE, FALSE, FALSE), b = FALSE)
@@ -98,6 +102,26 @@ test_that("a constant column never keeps a stage iterating; verbose reports each
   expect_named(out$not_converged, c("row", "column"))
   expect_type(out$not_converged$row, "integer")
   expect_null(names(out$not_converged$row))
+})
+
+test_that("an error in a fit or in the stopping rule names the column", {
+  X <- sim_numeric(30, 4, seed = 1); X[c(2, 5), 3] <- NA          # only F3 is a target
+  enc <- encode_input(X, NULL); W0 <- first_guess(enc$W, enc, "minVar")
+  s <- col_scales(enc$W, enc$miss, enc$type); st <- make_streams(1L, 1L, 4L)[[1]]
+  # Mocked bindings are invisible to multisession workers, so the plan is sequential here.
+  old_plan <- future::plan(future::sequential); withr::defer(future::plan(old_plan))
+  local_mocked_bindings(fit_predict = function(...) stop("non-finite prediction"))
+  # future.apply adds its own "Canceling all iterations" warning to a job error; only that
+  # one is muffled.
+  expect_error(withCallingHandlers(
+    run_stage(W0, enc, s, st, 0.05, 1L, "ranger", 10, 1, 1, FALSE),
+    warning = function(w) if (grepl("Canceling all iterations", conditionMessage(w), fixed = TRUE))
+      invokeRestart("muffleWarning")),
+    "column 'F3': non-finite prediction", fixed = TRUE)
+  local_mocked_bindings(fit_predict = function(method, y, x_train, x_pred, ...)
+    list(pred = rep(NaN, nrow(x_pred)), oob = NA_real_))
+  expect_error(run_stage(W0, enc, s, st, 0.05, 1L, "ranger", 10, 1, 1, FALSE),
+               "column 'F3': non-finite prediction: 2 of 2 cells", fixed = TRUE)
 })
 
 test_that("a stage gives identical results with 1 and 4 workers", {

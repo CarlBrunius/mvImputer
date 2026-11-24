@@ -1,3 +1,6 @@
+# test-helpers.R -- the simulation helpers in helper-sim.R (sim_numeric, sim_mixed,
+# punch_holes) that every other test file builds its data from.
+
 test_that("punch_holes mcar hits the requested fraction and leaves other cells alone", {
   X <- sim_numeric(100, 20, seed = 1)
   Y <- punch_holes(X, 0.1, "mcar", seed = 2)

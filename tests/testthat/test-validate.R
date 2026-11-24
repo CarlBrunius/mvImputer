@@ -146,7 +146,7 @@ test_that("nComp, ntree and mtry must be positive whole numbers", {
   expect_error(ci(d40(), mtry = -2), "mtry")
   expect_error(ci(d40(), mtry = 2.5), "mtry")
   expect_silent(ci(d40(), ntree = 100, mtry = 5, nComp = 2))
-  expect_silent(ci(d40(), mtry = NULL))          # NULL means not supplied
+  expect_error(ci(d40(), mtry = NULL), "mtry must be a single positive whole number", fixed = TRUE)
 })
 
 test_that("guess is one of the three strings or a table of X's dimensions", {
@@ -182,4 +182,44 @@ test_that("duplicate column names are an error, excluded columns included", {
   expect_error(ci(d), "Column names must be unique (duplicated: 'num1')", fixed = TRUE)
   expect_error(ci(d, exclude = "const"), "Column names must be unique")
   expect_silent(ci(matrix(rnorm(12), 4, 3)))               # unnamed matrix: unaffected
+})
+
+test_that("empty or NA column names are an error naming their positions", {
+  # What cbind(a = x, b = y, z) gives: a partly named matrix with one "" name.
+  M <- cbind(a = c(1, NA, 3, 4), b = c(5, 6, 7, 8), c(2, 3, NA, 5))
+  expect_identical(colnames(M), c("a", "b", ""))
+  expect_error(ci(M), "Column names must not be empty or NA (column position(s) 3)", fixed = TRUE)
+  colnames(M)[3] <- NA
+  expect_error(ci(M), "Column names must not be empty or NA (column position(s) 3)", fixed = TRUE)
+  M2 <- cbind(M, M[, 3]); colnames(M2) <- c("a", "", "b", "")   # two "": not a "duplicate"
+  expect_error(ci(M2), "Column names must not be empty or NA (column position(s) 2, 4)", fixed = TRUE)
+  d <- d40(); names(d)[names(d) == "fac3"] <- ""                 # a factor column named ""
+  expect_error(ci(d), "Column names must not be empty or NA (column position(s) 6)", fixed = TRUE)
+  d <- d40(); names(d)[2] <- NA
+  expect_error(ci(d), "Column names must not be empty or NA (column position(s) 2)", fixed = TRUE)
+})
+
+test_that("an excluded matrix column does not shift the rows with no observed value", {
+  # is.na() of a data frame expands a matrix column into two; row 1 is empty outside m.
+  d <- data.frame(a = c(NA, 1:19 + 0), b = c(NA, 20:2 + 0))
+  d$m <- cbind(u = c(5, rep(NA, 19)), v = c(6, rep(NA, 19)))
+  d <- d[, c("m", "a", "b")]
+  expect_identical(rows_without_observed(d, "m"), 1L)
+  expect_warning(ci(d, exclude = "m"), "row numbers 1)", fixed = TRUE)
+})
+
+test_that("an all-zero 0/1 column does not merge two one-hot blocks (single-value rule)", {
+  # Without the rule the all-zero column is "never both 1" with every column, links the
+  # blocks {a1, a2} and {c1, c2} into one group whose rows sum to 2, and hides both.
+  d <- d40(); g <- rep(1:2, length.out = 40); h <- rep(c(1, 1, 2, 2), length.out = 40)
+  d$a1 <- as.numeric(g == 1); d$a2 <- as.numeric(g == 2)
+  d$c1 <- as.numeric(h == 1); d$c2 <- as.numeric(h == 2)
+  d$zero <- 0
+  msgs <- character()
+  withCallingHandlers(ci(d), warning = function(w) {
+    msgs <<- c(msgs, conditionMessage(w)); invokeRestart("muffleWarning")
+  })
+  expect_length(msgs, 2L)
+  expect_match(msgs[1], "'a1', 'a2' are numeric 0/1 columns", fixed = TRUE)
+  expect_match(msgs[2], "'c1', 'c2' are numeric 0/1 columns", fixed = TRUE)
 })

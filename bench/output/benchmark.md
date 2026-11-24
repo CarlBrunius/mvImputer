@@ -4,7 +4,10 @@
 
 - Ratio of wall time new/old, one run each: (i, 2 workers) 0.51, new 167 s, old 328 s; (i, 4 workers) 0.54, new 104 s, old 190 s; (ii, 2 workers) 0.36, new 134 s, old 377 s; (ii, 4 workers) 0.39, new 82 s, old 210 s; (iii, 2 workers) **FLAG 1.53**, new 36 s, old 23 s; (iii, 4 workers) **FLAG 1.92**, new 33 s, old 17 s.
 - **FLAG: scenario iii at 2 workers, ratio 1.53; scenario iii at 4 workers, ratio 1.92 exceed(s) 1.25.** A ratio compares whole runs, not cost per iteration: the old engine ran (i, 2w) 75, (i, 4w) 75, (ii, 2w) 75, (ii, 4w) 75, (iii, 2w) 75, (iii, 4w) 75 iterations (caps 15 + 60 = 75), the new engine (i, 2w) 14, (i, 4w) 14, (ii, 2w) 11, (ii, 4w) 11, (iii, 2w) 75, (iii, 4w) 75 (it stops a stage when its cells have converged).
-- This is a single run per cell (data seed 1). The old engine's runs are not reproducible (its parallel workers are not seeded) and timings carry machine noise, so differences of a few percent in time or in RMSE mean nothing. Replicate-level accuracy (5 data sets per scenario, paired) is in `bench/output/calibration.md`.
+- Time per iteration (wall seconds divided by iterations, averaged over the run), new/old, in scenarios i and ii: 2.4 to 2.9. The new engine is faster there only because it stops early.
+- This is a single run per cell (data seed 1). The old engine's runs are not reproducible (its parallel workers are not seeded) and timings carry machine noise, so differences of a few percent in time mean nothing.
+- Raw RMSE: in scenarios i and ii the new engine's raw RMSE is 7 % to 15 % above the old engine's, while the scaled RMSE differs by at most 0.5 %. Raw RMSE weights the highest-SD, heavy-tailed columns heavily, and a few imputed cells there carried most of the scenario ii gap in a decomposition of that data set. Single-run raw RMSE is also unstable: one repeat run of the old engine in scenario i (2 workers) moved its raw RMSE from 1.98 to 2.18. Over 5 paired replicates (`bench/output/calibration.md`) the raw RMSE was: random gaps 2.868 (new) against 2.880 (old), left-censored 0.593 against 0.578; the cause of the left-censored gap is not established.
+- Replicate-level accuracy (5 data sets per scenario, paired) is in `bench/output/calibration.md`.
 
 ## Definitions
 

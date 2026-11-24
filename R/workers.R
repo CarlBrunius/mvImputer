@@ -12,7 +12,8 @@
 # Dependencies: future (plan, multisession, nbrOfWorkers, availableCores).
 #
 # Rules (workers argument):
-#   NULL, active plan not sequential -> use it, leave it in place (the user chose it)
+#   NULL, active plan not sequential -> use it, leave it in place (the user chose it);
+#                                       returns NA if the plan reports Inf workers
 #   NULL, plan sequential            -> multisession with k = min(8, availableCores() - 1)
 #                                       workers if k >= 2, else stay sequential
 #   1                                -> sequential for the call; an active worker pool is shut
@@ -42,7 +43,12 @@ local_workers <- function(workers, envir = parent.frame()) {
 
   if (is.null(workers)) {
     # The user's plan is neither replaced nor restored: touching it would restart their workers.
-    if (!inherits(future::plan(), "sequential")) return(as.integer(future::nbrOfWorkers()))
+    # Some backends (e.g. batch schedulers) report Inf workers; as.integer(Inf) would be NA
+    # with a coercion warning, so that case is NA by design (documented in ?mvImpute).
+    if (!inherits(future::plan(), "sequential")) {
+      n <- future::nbrOfWorkers()
+      return(if (is.finite(n)) as.integer(n) else NA_integer_)
+    }
     k <- min(MAX_AUTO_WORKERS, as.integer(future::availableCores()) - 1L)
     if (k < 2L) return(1L)
     return(set_multisession(k, envir))

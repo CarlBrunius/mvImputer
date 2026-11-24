@@ -59,12 +59,20 @@ stage_jobs <- function(miss, frozen, targets) {
 
 # `job` carries col/train/pred plus what fit_predict() needs about the target: `y` (its
 # originally observed values), `drop` (its own columns in D), `is_factor`, `n_levels`,
-# `scale`. Everything else the worker sees is in the argument list.
+# `scale`, and `label` (the column's name, for error messages only). Everything else the
+# worker sees is in the argument list.
 stage_fit_job <- function(job, D, method, ntree, mtry, nComp) {
   x_train <- D[job$train, -job$drop, drop = FALSE]
   x_pred  <- D[job$pred, -job$drop, drop = FALSE]
-  fit_predict(method, job$y, x_train, x_pred, job$is_factor, job$n_levels, job$scale,
-              ntree, mtry, nComp)
+  with_column(job$label, fit_predict(method, job$y, x_train, x_pred, job$is_factor,
+                                     job$n_levels, job$scale, ntree, mtry, nComp))
+}
+
+# The backends and converge_cells() never see column names, so an error raised there (often
+# inside a worker) would not say which column failed; this prefixes the column's name.
+with_column <- function(label, expr) {
+  tryCatch(expr, error = function(e)
+    stop("column '", label, "': ", conditionMessage(e), call. = FALSE))
 }
 
 # --- run_stage ----------------------------------------------------------------------
@@ -103,7 +111,7 @@ run_stage <- function(W, enc, scales, streams, tol, maxIter, method, ntree, mtry
       c(job, list(y = unname(W[job$train, col]), drop = dm$map[[col]],
                   is_factor = is_factor[col],
                   n_levels = if (is_factor[col]) length(enc$levels[[enc$colnames[col]]]) else NA,
-                  scale = scales[col]))
+                  scale = scales[col], label = enc$colnames[col]))
     })
     seeds <- lapply(jobs, function(job) stream_for_iteration(streams[[job$col]], iter, crn))
     fits <- future.apply::future_lapply(payload, stage_fit_job, D = dm$D, method = method,
@@ -115,10 +123,11 @@ run_stage <- function(W, enc, scales, streams, tol, maxIter, method, ntree, mtry
       col <- jobs[[k]]$col; rows <- jobs[[k]]$pred
       new <- fits[[k]]$pred
       if (forceZero && !is_factor[col]) new <- pmax(new, 0)
-      res <- converge_cells(old = unname(W[rows, col]), new = new,
-                            prev_same = prev_same[rows, col],
-                            scale = rep(scales[col], length(rows)),
-                            is_factor = rep(is_factor[col], length(rows)), tol = tol)
+      res <- with_column(enc$colnames[col],
+                         converge_cells(old = unname(W[rows, col]), new = new,
+                                        prev_same = prev_same[rows, col],
+                                        scale = rep(scales[col], length(rows)),
+                                        is_factor = rep(is_factor[col], length(rows)), tol = tol))
       W[rows, col] <- new
       frozen[rows, col] <- res$converged
       prev_same[rows, col] <- res$same

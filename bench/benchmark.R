@@ -208,6 +208,20 @@ write_report <- function(res, path) {
   sum_rows <- sprintf("(%s, %d workers) %s, new %s s, old %s s", rt$scenario, rt$workers,
                       vapply(rt$ratio, ratio_cell, ""), fmt(rt$new, 0), fmt(rt$old, 0))
   old <- res[res$engine == "old", ]; new <- res[res$engine == "new", ]
+  # Numeric scenarios only: per-iteration cost and the raw- vs scaled-RMSE gaps, paired by
+  # scenario x workers. Time per iteration is a whole-run average (later iterations refit
+  # fewer columns), so it shows where the speed comes from, not a per-fit cost.
+  pm <- merge(new, old, by = c("scenario", "workers"), suffixes = c("_new", "_old"))
+  pm <- pm[pm$scenario %in% c("i", "ii"), ]
+  per_iter <- (pm$seconds_new / (pm$iter1_new + pm$iter2_new)) /
+              (pm$seconds_old / (pm$iter1_old + pm$iter2_old))
+  raw_gap    <- 100 * (pm$rmse_raw_new / pm$rmse_raw_old - 1)
+  scaled_gap <- 100 * abs(pm$rmse_scaled_new / pm$rmse_scaled_old - 1)
+  # Quoted, not computed here: the old engine's raw RMSE on one repeat run of scenario i
+  # (same data, 2 workers; an independent rerun by a reviewer, not cached), and the paired
+  # 5-replicate means of bench/output/calibration.md at the default tol.
+  rerun_txt <- "one repeat run of the old engine in scenario i (2 workers) moved its raw RMSE from 1.98 to 2.18"
+  calib_txt <- "random gaps 2.868 (new) against 2.880 (old), left-censored 0.593 against 0.578"
   body <- c(
     "# Benchmark: mvImpute() against the old engine", "",
     "## Summary", "",
@@ -215,7 +229,12 @@ write_report <- function(res, path) {
     sprintf("- %s A ratio compares whole runs, not cost per iteration: the old engine ran %s iterations (caps 15 + 60 = 75), the new engine %s (it stops a stage when its cells have converged).",
             flag_txt, paste(sprintf("(%s, %dw) %d", old$scenario, old$workers, old$iter1 + old$iter2), collapse = ", "),
             paste(sprintf("(%s, %dw) %d", new$scenario, new$workers, new$iter1 + new$iter2), collapse = ", ")),
-    "- This is a single run per cell (data seed 1). The old engine's runs are not reproducible (its parallel workers are not seeded) and timings carry machine noise, so differences of a few percent in time or in RMSE mean nothing. Replicate-level accuracy (5 data sets per scenario, paired) is in `bench/output/calibration.md`.", "",
+    sprintf("- Time per iteration (wall seconds divided by iterations, averaged over the run), new/old, in scenarios i and ii: %s to %s. The new engine is faster there only because it stops early.",
+            fmt(min(per_iter), 1), fmt(max(per_iter), 1)),
+    "- This is a single run per cell (data seed 1). The old engine's runs are not reproducible (its parallel workers are not seeded) and timings carry machine noise, so differences of a few percent in time mean nothing.",
+    sprintf("- Raw RMSE: in scenarios i and ii the new engine's raw RMSE is %s %% to %s %% above the old engine's, while the scaled RMSE differs by at most %s %%. Raw RMSE weights the highest-SD, heavy-tailed columns heavily, and a few imputed cells there carried most of the scenario ii gap in a decomposition of that data set. Single-run raw RMSE is also unstable: %s. Over 5 paired replicates (`bench/output/calibration.md`) the raw RMSE was: %s; the cause of the left-censored gap is not established.",
+            fmt(min(raw_gap), 0), fmt(max(raw_gap), 0), fmt(max(scaled_gap), 1), rerun_txt, calib_txt),
+    "- Replicate-level accuracy (5 data sets per scenario, paired) is in `bench/output/calibration.md`.", "",
     "## Definitions", "",
     "- **Wall seconds**: `proc.time()` elapsed around the engine call. Both engines start their own worker pool inside the call, so pool start-up is included for both; data building, decoding and scoring are not.",
     "- **Ratio new/old**: wall seconds of `mvImpute()` divided by wall seconds of `StatTools::mvImpWrap()` at the same scenario and worker count. Above 1.25 it is flagged.",
