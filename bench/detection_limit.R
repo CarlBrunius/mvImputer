@@ -9,7 +9,7 @@
 #   scale and on the original scale; the share of imputed cells above the truth, below the
 #   column's observed minimum, and zero or negative. Reported as the mean (and SD) over 5 data
 #   sets, plus in how many of the 5 a method beat the minimum fill. No uncertainty beyond that.
-# Usage (from the package root, after R CMD INSTALL --no-docs .; about 12 minutes, one process):
+# Usage (from the package root, after R CMD INSTALL --no-docs .; about 10 minutes, one process):
 #   Rscript bench/detection_limit.R          # every seed not yet cached, then the report
 #   Rscript bench/detection_limit.R report   # the report again from the cached runs
 #   The published run was started at BelowNormal priority (PowerShell Start-Process
@@ -262,7 +262,7 @@ write_report <- function(runs, path) {
     sprintf("- %s; mvImputer %s; ranger %s; mixOmics %s; %d logical cores. One machine; other jobs may have run at the same time, so seconds are indicative.",
             R.version.string, utils::packageVersion("mvImputer"), utils::packageVersion("ranger"),
             utils::packageVersion("mixOmics"), parallel::detectCores()),
-    "- Script: `bench/detection_limit.R`. It replaces two exploratory scripts (not committed) whose designs it keeps; their log-scale `left` fits are not run twice. This run reproduced every error, share and iteration count of those two runs exactly (105 method-by-seed rows); only the seconds differ, as timings do.", "",
+    "- Script: `bench/detection_limit.R`. It replaces two exploratory scripts (not committed) whose designs it keeps; their log-scale `left` fits are not run twice.", "",
     "## Experiment 1: scale, engine and forceZero (pattern `left`)", "",
     "Log-scale RMSE is n/a where an imputed value was zero or negative (log undefined); the original-scale RMSE then still applies.", "",
     table_a(runs), "",

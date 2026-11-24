@@ -62,15 +62,17 @@ what happened there, not what will happen on your data.
 * **A 0 that means "not detected" must become `NA` before you log.** *Reasoning:* `log(0)` is
   `-Inf`, which `mvImpute()` refuses, and a 0 left as a value is treated as observed.
 * **Usual order:** sample-level normalisation (for example PQN for dilution), then log
-  transform, then imputation. *Reasoning;* the package does none of these, and the choice is
+  transform, then imputation. *Reasoning:* the package does none of these, and the choice is
   yours.
 * **`forceZero`** only matters for `method = "pls"` on non-negative, untransformed data, and PLS
   on untransformed intensities is not recommended. *Simulation:* it set 54 % of the imputed
   cells to zero (59 % were zero or negative without it). Keep `forceZero = FALSE` on log-scale
   data, where negative values are legitimate. Forests never need it, as they cannot predict
   outside the observed range.
-* **`guess`** hardly changes the final values. *Simulation:* ranger 0.442 with `"minVar"`
-  against 0.443 with `"median"` (NEWS, 3 data sets); PLS on log data 0.953 against 0.954. Use
+* **`guess`** hardly changes the final values. *Simulation (PLS only):* with 3 components on log
+  data, `"minVar"` against `"median"` gave 1.154 against 1.155, 0.953 against 0.954 and 0.944
+  against 0.945 in the three patterns below. For the forests this is expected, because the
+  iterations replace the starting values, but it was not evaluated (*reasoning*). Use
   `"minVar"` for omics data where low values go missing and `"median"` for covariates
   (*reasoning*).
 * **Filter features with too many gaps before imputing; choose and report the threshold**
@@ -95,24 +97,26 @@ RMSE against the truth; lower is better; `bench/output/detection-limit.md`)
 * PLS ran 4.5 to 5.6 times faster than ranger here (one worker).
 * **Recommendation for metabolomics-type data where low values go missing:** log-transform, then
   `method = "pls"` (*simulation*; two or three components gave similar results). If you know the
-  gaps are strictly below a detection limit, a fill at or below the limit may be as good or
-  better (*simulation*, first row).
+  gaps are strictly below a detection limit, a minimum fill (each gap set to the lowest observed
+  value of its column) was closer than PLS in this simulation, in all 5 simulated data sets
+  (0.62 against 1.13; *simulation*, first row), so it is worth considering.
 * Caveats: the simulated data are low-rank and log-normal, which favours PLS; "strictly the
   lowest" is the case most favourable to a minimum fill; only 2 and 3 components and only ranger
   among the forests were tried.
 
-**By data type.** Only the metabolomics row is backed by simulation; every other row is
+**By data type.** In the metabolomics row only the log scale and the choice of PLS rather than
+ranger or a minimum fill are backed by simulation; the rest of that row and every other row is
 *reasoning, not evaluated*. Vendor and platform details vary: check them against your own data.
 
 | Data | Typical missingness | Impute on | `method` | `guess` | Notes |
 |---|---|---|---|---|---|
-| LC/GC-MS metabolomics (*simulation*) | mostly low values below detection, some random | log | `"pls"` | `"minVar"` | see the table above; filter features with many gaps first |
+| LC/GC-MS metabolomics | mostly low values below detection, some random (*reasoning*) | log (*simulation*) | `"pls"` (*simulation*) | `"minVar"` (*reasoning*) | see the table above; zeros meaning "not detected" to `NA` and normalisation before the log, and filtering features with many gaps first (*reasoning*) |
 | MS proteomics, label-free DDA | a mix of low-abundance and random gaps | log2 intensities | `"pls"` or `"ranger"` | `"minVar"` | filter features first; report the threshold |
-| MS proteomics, DIA | usually fewer and more random gaps | log2 intensities | `"ranger"` or `"pls"` | `"median"` or `"minVar"` | |
+| MS proteomics, DIA | often reported to have fewer gaps than DDA; check whether those left concentrate at low intensity | log2 intensities | `"ranger"` or `"pls"` | `"median"` or `"minVar"` | |
 | MS proteomics, TMT | often block-wise: a protein missing in a whole plex or batch | log2 intensities | only for scattered gaps | `"minVar"` or `"median"` | do not impute whole-batch gaps: it mixes the batch effect into the values |
 | Olink NPX | often few; some values below the limit of detection (LOD) | already log2: no further transform | `"pls"` or `"ranger"` | `"minVar"` if the gaps are below the LOD, else `"median"` | NPX can be negative, so `forceZero = FALSE`; check whether your data already report values below the LOD, in which case little may be missing |
 | SomaScan and other affinity panels | usually few | log (the signal is right-skewed) | `"ranger"` or `"pls"` | `"median"` | |
-| Gene-expression microarray | mostly failed spots | log2 intensities | `"ranger"` or `"pls"` | `"median"` | |
+| Gene-expression microarray | often failed spots; some pipelines also set values missing by a detection p-value filter, which is tied to low intensity (check yours) | log2 intensities | `"ranger"` or `"pls"` | `"median"` (`"minVar"` if the gaps follow a detection filter) | |
 | RNA-seq | zeros are real counts, not missing | a log-CPM-type scale | `"ranger"` or `"pls"` | `"median"` | do not impute zeros; impute only true `NA`; about 20,000 genes make runs slow (filter first) |
 | DNA methylation | failed detection, linked to low total signal rather than low methylation | M-values, not beta values | `"ranger"` or `"pls"` | `"median"` | PLS on beta values can leave [0, 1] and `forceZero` gives no upper bound; 450K/EPIC arrays have hundreds of thousands of CpGs and one model is fitted per column per iteration, so the package is not designed for array-wide methylation imputation |
 | Clinical covariates | any | original scale, factors as factors | `"ranger"` | `"median"` | |
@@ -135,8 +139,8 @@ RMSE against the truth; lower is better; `bench/output/detection-limit.md`)
   RMSE 0.065 against 0.469 on the original scale; `bench/output/detection-limit.md`). That is one
   simulated setting, the one most favourable to a minimum fill. `method = "pls"` is linear and can
   extrapolate below the observed range, including to negative values on untransformed intensities
-  (59 % of its imputations in that simulation). On log-scale data PLS was closest of the package's
-  methods in the detection-limit simulations.
+  (59 % of its imputations in that simulation). On log-scale data PLS was closer than ranger in
+  the detection-limit simulations (`randomForest` was not run).
 * **Single imputation.** The result is one deterministic completed table. Downstream standard
   errors that treat imputed values as observed are too small.
 * **Linear dependencies.** Exact linear dependencies among numeric columns that you supply (your

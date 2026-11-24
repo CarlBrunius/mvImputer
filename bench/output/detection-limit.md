@@ -26,7 +26,7 @@
 - Data: `sim_numeric(200, 100, seed = s)`, s = 1 to 5 (log-normal, rank-3 signal plus noise). Gaps: 5 % of cells. `left`: the lowest 5 % of every column (deterministic). `graded`: in each column 5 % of rows drawn with weight exp(-2 z), z the standardised log value (hole seed 3000 + s). `mixed`: the lowest 2.5 % of each column plus 2.5 % of the remaining cells at random (hole seeds 1000 + s and 2000 + s).
 - `mvImpute()` with its defaults (100 trees, mtry 5, `tol = c(0.05, 0.025)`, `maxIter = c(15, 60)`, `guess = "minVar"`) except what the row says; `seed = s`, `workers = 1`. Log-scale rows impute `log(table)` and exponentiate.
 - R version 4.6.1 (2026-06-24 ucrt); mvImputer 0.1.0; ranger 0.18.0; mixOmics 6.36.0; 24 logical cores. One machine; other jobs may have run at the same time, so seconds are indicative.
-- Script: `bench/detection_limit.R`. It replaces two exploratory scripts (not committed) whose designs it keeps; their log-scale `left` fits are not run twice. This run reproduced every error, share and iteration count of those two runs exactly (105 method-by-seed rows); only the seconds differ, as timings do.
+- Script: `bench/detection_limit.R`. It replaces two exploratory scripts (not committed) whose designs it keeps; their log-scale `left` fits are not run twice.
 
 ## Experiment 1: scale, engine and forceZero (pattern `left`)
 

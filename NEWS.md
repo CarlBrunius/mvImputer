@@ -101,15 +101,15 @@ The `tol` and common-random-number choices below, and the speed figures above, r
   1 of 20 runs, against 6 of 20).
 * With `method = "randomForest"` common random numbers do not keep the predictions stable
   between iterations (a small change in the data re-randomises most of the forest), so runs
-  often reach `maxIter`. In one check (200 x 100, 5 % random gaps, 3 runs) it ran 15 + 60,
-  15 + 43 and 15 + 44 iterations against 5 or 6 + 6 for ranger, about 5 times the run time.
+  often reach `maxIter`. In an informal check outside the committed benchmarks, randomForest
+  runs often reached the iteration cap and took several times longer than ranger.
 
 ## Known limitations
 
 * On tables with factor-like columns the final stage often reaches `maxIter`, so the "not
-  converged" warning is common there (54 of 60 simulated runs on a mixed table). The cells
-  left are mostly numeric (10 of 11, 7 of 9 and 15 of 16 in three simulated runs), and the
-  same tables without their factor-like columns converged. The likely cause is factor levels
+  converged" warning is common there (54 of 60 simulated runs on a mixed table). In informal
+  checks outside the committed benchmarks, the cells left were mostly numeric, and the same
+  tables without their factor-like columns converged. The likely cause is factor levels
   that change between iterations and so change the other columns' predictors, but this is
   not proven. The cells concerned are listed in `attr(out, "mvImpute")$not_converged`. To be
   revisited after first real use.
@@ -119,25 +119,26 @@ The `tol` and common-random-number choices below, and the speed figures above, r
   and leaving the column minimum in place was much closer to the truth (SD-scaled RMSE 0.065
   against 0.469 on the original scale; `bench/output/detection-limit.md`). That is one
   simulated setting, the one most favourable to a minimum fill. `guess` hardly changes the
-  result (ranger: 0.442 with `"minVar"` against 0.443 with `"median"` in an earlier
-  3-replicate check; PLS on log data: 0.953 against 0.954). `method = "pls"` is linear and
-  can extrapolate below the observed range, including to negative values on untransformed
-  intensities (59 % of its imputations in that simulation). On log-scale data PLS was
-  closest of the package's methods in the detection-limit simulations.
+  result (PLS with 3 components on log data, `"minVar"` against `"median"`: 1.154 against
+  1.155, 0.953 against 0.954 and 0.944 against 0.945 in the three patterns of
+  `bench/output/detection-limit.md`; not evaluated for the forests). `method = "pls"` is
+  linear and can extrapolate below the observed range, including to negative values on
+  untransformed intensities (59 % of its imputations in that simulation). On log-scale data
+  PLS was closer than ranger in the detection-limit simulations (`randomForest` was not run).
 * On simulated left-censored data (200 x 500, 5 % of the lowest values missing; 5 replicates)
   the raw RMSE of `mvImpute()` with the default `tol` was 2.7 % higher than that of StatTools
   0.0.917 (mean 0.593 against 0.578), higher in every replicate, while the SD-scaled RMSE was
   equal (0.494 against 0.492); a smaller `tol` did not close the gap (0.595 at
   `tol = c(0.025, 0.005)`). In one larger run (200 x 1000) the gap was 7 % to 9 %, and in a
   decomposition of that data set a few cells in the highest-SD, heavy-tailed columns carried
-  most of it. One repeat run of the old engine on the random-gap benchmark table moved its
-  raw RMSE from 1.98 to 2.18 (about 10 %), so single-run raw RMSE comparisons are weak. The
+  most of it. In an informal check outside the committed benchmarks, a repeat run of the old
+  engine on the random-gap benchmark table gave a clearly different raw RMSE, so single-run
+  raw RMSE comparisons are weak. The
   cause is not established. Common random numbers, and the earlier stop they bring, are one
   possible contributor: on random gaps they gave a higher raw RMSE in 5 of 5 seeds
   (`bench/output/experiments.md`); this is unproven for the left-censored case.
 * A factor cell that keeps cycling is returned at the level of the last iteration, so for a
-  cycle of two levels the result depends on whether the cap is odd or even (in one simulated
-  run, a final-stage `maxIter` of 60 against 61 changed one imputed label).
+  cycle of two levels the result depends on whether the cap is odd or even.
 
 ## Assumptions to know about
 

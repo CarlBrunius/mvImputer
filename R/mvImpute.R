@@ -71,8 +71,8 @@
 #'   scale; `bench/output/detection-limit.md`). That is one simulated setting, the one most
 #'   favourable to a minimum fill. `method = "pls"` is linear and can extrapolate below the
 #'   observed range, including to negative values on untransformed intensities (59 % of its
-#'   imputations in that simulation). On log-scale data PLS was closest of the package's
-#'   methods in the detection-limit simulations.
+#'   imputations in that simulation). On log-scale data PLS was closer than ranger in the
+#'   detection-limit simulations (`randomForest` was not run).
 #' * **Single imputation.** The result is one deterministic completed table. Downstream
 #'   standard errors that treat imputed values as observed are too small.
 #' * **Linear dependencies.** Exact linear dependencies among numeric columns that you
@@ -82,8 +82,11 @@
 #'
 #' @section Choosing `guess`:
 #' `guess` sets only the starting values, which the iterations replace: the final values
-#' hardly depend on it (SD-scaled RMSE 0.442 with `"minVar"` against 0.443 with `"median"`
-#' in a simulation with detection-limit gaps). `"minVar"` (the default) starts each numeric
+#' hardly depend on it (PLS with 3 components on log data, SD-scaled RMSE with `"minVar"`
+#' against `"median"`: 1.154 against 1.155 when the lowest values were missing, 0.953 against
+#' 0.954 for a soft limit, 0.944 against 0.945 for mixed gaps; `bench/output/detection-limit.md`).
+#' For the forests this is expected, because the iterations replace the starting values, but
+#' no committed report evaluates it. `"minVar"` (the default) starts each numeric
 #' gap at the column minimum. For a covariate table (clinical or questionnaire variables)
 #' `guess = "median"` is the natural start. `"minTotal"` starts every numeric gap
 #' at the smallest observed value over all numeric columns. A matrix or data frame of the
@@ -113,14 +116,12 @@
 #'   random it overstates how well the imputed values can be predicted.
 #' * Known limitation: on tables with factor-like columns the final stage often reaches
 #'   `maxIter` (54 of 60 simulated runs on a mixed table), so the "not converged" warning
-#'   is common there. The cells left are mostly numeric (10 of 11, 7 of 9 and 15 of 16 in
-#'   three simulated runs), and the same tables without their factor-like columns
-#'   converged. The likely cause is factor levels that change between iterations and so
+#'   is common there. In informal checks outside the committed benchmarks, the cells left
+#'   were mostly numeric, and the same tables without their factor-like columns converged. The likely cause is factor levels that change between iterations and so
 #'   change the other columns' predictors, but this is not proven. The cells concerned are
 #'   listed in the diagnostics' `not_converged`. A factor cell that keeps cycling is returned
 #'   at the level of the last iteration, so for a cycle of two levels the result depends on
-#'   whether the cap is odd or even (in one simulated run, `maxIter` 60 against 61 in the
-#'   final stage changed one imputed label).
+#'   whether the cap is odd or even.
 #'
 #' @param X A data frame or a numeric matrix. The same class is returned.
 #' @param method `"ranger"` (default), `"randomForest"`, or `"pls"` (needs the
@@ -128,8 +129,8 @@
 #'   reuses one random stream in every iteration of a stage) and the speed figures in NEWS
 #'   were evaluated with `"ranger"` only. With `"randomForest"`, common random numbers do
 #'   not keep the predictions stable between iterations, so runs often reach `maxIter`: in
-#'   one check (200 x 100, 5 % random gaps, 3 runs) it ran 15 + 60, 15 + 43 and 15 + 44
-#'   iterations against 5 or 6 + 6 for ranger, about 5 times the run time. `"pls"` was
+#'   an informal check outside the committed benchmarks, runs often reached the iteration cap
+#'   and took several times longer than ranger. `"pls"` was
 #'   evaluated only on simulated detection-limit gaps (`bench/output/detection-limit.md`).
 #' @param exclude Character vector of column names that are passed through untouched
 #'   (identifiers, the outcome). The checks on column values and types skip them; the
