@@ -91,6 +91,10 @@
 #'   non-sequential plan as it is and leaves it in place.
 #' * `oob_error` is estimated on observed rows, so when the gaps are not missing at
 #'   random it overstates how well the imputed values can be predicted.
+#' * Known limitation: on tables with factor-like columns the final stage often reaches
+#'   `maxIter`, because predicted factor levels can cycle between iterations, so the "not
+#'   converged" warning is common there. The cells concerned are listed in the
+#'   diagnostics' `not_converged`.
 #'
 #' @param X A data frame or a numeric matrix. The same class is returned.
 #' @param method `"ranger"` (default), `"randomForest"`, or `"pls"` (needs the
@@ -109,6 +113,7 @@
 #'   workers. The previous plan is restored on exit.
 #' @param tol Numeric vector, one value per stage: the convergence tolerance as a
 #'   fraction of the standard deviation of the observed values of each numeric column.
+#'   The defaults were chosen by simulation.
 #' @param maxIter Whole numbers, one per stage: the iteration cap of that stage.
 #'   `length(maxIter)` must equal `length(tol)`.
 #' @param guess `"minVar"`, `"median"`, `"minTotal"`, or a matrix or data frame with the

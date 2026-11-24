@@ -175,7 +175,11 @@ md_table <- function(df) c(paste0("| ", paste(names(df), collapse = " | "), " |"
 # verdict is reported with the size of each difference; the decision is Carl's.
 crn_verdict <- function(a, b) {
   it  <- tapply(a$iter1 + a$iter2, a$crn, mean)
-  d   <- a$scaled[a$crn] - a$scaled[!a$crn]            # rows are in seed order for both
+  # Paired by seed explicitly, so the pairing does not depend on the loop's row order.
+  m   <- merge(a[a$crn, c("seed", "scaled")], a[!a$crn, c("seed", "scaled")], by = "seed",
+               suffixes = c("_crn", "_free"))
+  stopifnot(nrow(m) == length(SEEDS))                  # BLOCKING: one pair per seed
+  d   <- m$scaled_crn - m$scaled_free
   se  <- stats::sd(d) / sqrt(length(d))
   harm <- c(iterations = it[["TRUE"]] > it[["FALSE"]], rmse = mean(d) > 2 * se,
             cap_b = sum(b$at_cap[b$crn]) > sum(b$at_cap[!b$crn]))
@@ -211,10 +215,11 @@ write_report <- function(a, b, minutes) {
     sprintf("- (b) Final stage at its cap: %d of %d runs with crn, %d of %d without; flip-backs (2-cycle signature) summed over runs: %d with crn, %d without.",
             sum(b$at_cap[b$crn]), sum(b$crn), sum(b$at_cap[!b$crn]), sum(!b$crn),
             sum(b$flipback[b$crn]), sum(b$flipback[!b$crn])),
-    sprintf("- Rule verdict (spec 5.5, \"kept unless it does harm\"; harm = more total iterations on average, a scaled RMSE worse by more than 2 standard errors of the paired difference, or the final stage at its cap in (b) more often than without crn): harm found in %s. Size: with crn the scaled RMSE is %s %% higher (worse in %d of %d seeds) at %s times fewer total iterations. Decision for Carl: keep crn = TRUE (fewer iterations, fewer cycles in (b)) or drop it (slightly lower RMSE in (a)).",
+    sprintf("- Rule verdict (spec 5.5, \"kept unless it does harm\"; harm = more total iterations on average, a scaled RMSE worse by more than 2 standard errors of the paired difference, or the final stage at its cap in (b) more often than without crn): harm found in %s. Size: with crn the scaled RMSE is %s %% higher (worse in %d of %d seeds) at %s times fewer total iterations. The RMSE gap is confounded with iteration count (%s against %s iterations): the extra iterations, rather than the random streams, may explain it (not tested).",
             if (any(v$harm)) paste(names(v$harm)[v$harm], collapse = ", ") else "none",
-            fmt(100 * v$rel, 2), v$n_worse, length(v$d), fmt(v$it[["FALSE"]] / v$it[["TRUE"]], 1)),
-    "- Uncertainty: 5 seeds in (a), 20 in (b). In (a) the two settings also differ in iterations run, so the RMSE gap may come from the extra iterations rather than from the random streams themselves (not tested here). Seconds were measured while other jobs ran on the machine and are inflated.", "",
+            fmt(100 * v$rel, 2), v$n_worse, length(v$d), fmt(v$it[["FALSE"]] / v$it[["TRUE"]], 1),
+            fmt(v$it[["TRUE"]], 1), fmt(v$it[["FALSE"]], 1)),
+    "- **Carl's decision (2026-11-24): keep crn = TRUE.** Uncertainty: 5 seeds in (a), 20 in (b); seconds were measured while other jobs ran on the machine and are inflated.", "",
     "## Definitions", "",
     "- **Scaled RMSE**: root mean squared error over all imputed cells against the simulated truth, each error divided by the SD of its column's observed values (the stopping rule's scale), pooled over columns. **Raw RMSE**: the same without scaling.",
     "- **Labels changed**: imputed labels of the two factors (both columns together) that differ from the previous iteration. **Flip-backs**: labels that changed and now equal their value two iterations earlier; a 2-cycle shows as a steady count of flip-backs and a final stage that runs to its cap. **Flip-backs, last iteration**: flip-backs in the last iteration of stage 2 (non-zero means a cycle still running when the stage stopped). Sequences are run-length coded: `2x13` is 2 in 13 consecutive iterations.", "",
@@ -225,6 +230,7 @@ write_report <- function(a, b, minutes) {
     "## (b) Two associated factors missing in the same rows", "",
     sprintf("Data: `sim_mixed(300)` plus `fac3b`, a copy of `fac3` whose labels are permuted within a random %d %% of rows; both missing in the same %d random rows (no other gaps). The table after iteration k is recomputed as the engine run with maxIter = k, which is exact (the first k iterations do not depend on maxIter).",
             round(100 * PERMUTE_FRAC), N_COMISS), "",
+    "Reading the crn rows: the two factors are each other's only imputed predictors and their training rows hold no imputed cells, so under crn each factor's model is the same in every iteration and an iteration is a fixed, deterministic map. A change therefore shows twice (`Nx2`: a label changes, then its partner follows) and then stops (`0x2`: two unchanged predictions freeze a cell). Seed 6's 2-cycle with crn is a genuine cycle of that map, not Monte Carlo noise.", "",
     md_table(tb), "",
     "## Setup", "",
     sprintf("- %s; mvImputer %s; ranger %s; future %s. One 2-worker multisession pool for all runs. Total run time %s minutes.",

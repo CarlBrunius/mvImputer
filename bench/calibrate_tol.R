@@ -46,6 +46,18 @@ OLD_ARGS   <- list(method = "RF", rfMeth = "ranger", tol1 = 0.05, n1 = 15, tol2 
                    n2 = 60, nCore = WORKERS)  # mvImpWrap defaults, written out
 OUT_DIR    <- "bench/output"
 CACHE_DIR  <- file.path(OUT_DIR, "cache-calibration")
+# Carl's decision of 2026-11-24, recorded in the report (the grid does not choose it).
+DECISION   <- "tol = c(0.05, 0.025)"
+# Why the old engine's numbers in the mixed table are not a reference cost (from its code:
+# it stops a cell when abs(new - old) / old < tol, old being the current value).
+OLD_ENGINE_III_NOTE <- paste(
+  "Note on the old engine in this scenario: its \"Cells left\" counts cells of the one-hot",
+  "indicator matrix, not table cells, so it is not comparable with the new engine's column.",
+  "Its stopping test divides the change by the current value; indicator cells start at 0",
+  "(the column minimum) and stay near 0, so the test is rarely met for them, while any",
+  "negative current value counts as converged. Its 75 iterations here follow from that rule",
+  "and are not a meaningful reference cost. In scenarios i and ii (positive data) its caps",
+  "are genuine.")
 SCENARIOS  <- c(i = "numeric 200 x 500, 5 % MCAR", ii = "numeric 200 x 500, 5 % left-censored",
                 iii = "mixed 900 x 20, 5 % MCAR")
 
@@ -137,9 +149,11 @@ run_new <- function(sc, tol1, tol2, seed) {
   secs <- proc.time()[["elapsed"]] - t0
   it <- attr(out, "mvImpute")$iterations
   stopifnot(attr(out, "mvImpute")$workers == WORKERS)             # BLOCKING: ran on the pool
+  left <- nrow(attr(out, "mvImpute")$not_converged[[2]])
+  # At cap = cap reached WITH cells left: a stage that converges on its last iteration
+  # has also run maxIter iterations, but it did converge.
   c(score_run(out, sc), iter1 = it[1], iter2 = it[2], iter_total = sum(it),
-    stage2_at_cap = it[2] == MAX_ITER[2],
-    left = nrow(attr(out, "mvImpute")$not_converged[[2]]), seconds = secs)
+    stage2_at_cap = it[2] == MAX_ITER[2] && left > 0, left = left, seconds = secs)
 }
 
 # set.seed(rep) before the call, as the brief asks, but scoped: with_seed restores the
@@ -157,10 +171,14 @@ run_old <- function(sc, seed) {
   second  <- which(grepl("SECOND ROUND", log))
   stopifnot(length(second) == 1L, sum(is_iter) >= 2L)             # BLOCKING: log format as read
   it1 <- sum(is_iter[seq_len(second)]); it2 <- sum(is_iter) - it1
-  still <- regmatches(log, regexpr("Still [0-9]+ NAs", log))       # one per stage at its cap
-  left <- if (it2 == OLD_ARGS$n2) as.numeric(gsub("[^0-9]", "",utils::tail(still, 1))) else 0
+  # mvImp prints "Still N NAs" only when a stage stops at its cap with cells left, so the
+  # stage-2 count is read from the lines after "SECOND ROUND" only (stage 1 has its own).
+  log2  <- log[seq.int(second + 1L, length(log))]
+  still <- regmatches(log2, regexpr("Still [0-9]+ NAs", log2))
+  stopifnot(length(still) <= 1L)                                   # BLOCKING: log format as read
+  left <- if (length(still)) as.numeric(gsub("[^0-9]", "", still)) else 0
   c(score_run(sc$decode_old(res), sc), iter1 = it1, iter2 = it2, iter_total = it1 + it2,
-    stage2_at_cap = it2 == OLD_ARGS$n2, left = left, seconds = secs)
+    stage2_at_cap = it2 == OLD_ARGS$n2 && left > 0, left = left, seconds = secs)
 }
 
 # One cached run: the key names engine, scenario, setting and replicate.
@@ -207,7 +225,9 @@ summarise_runs <- function(res) {
                rmse_raw = mean(r$rmse_raw), acc = mean(r$factor_acc),
                iter1 = mean(r$iter1), iter2 = mean(r$iter2), iter = mean(r$iter_total),
                iter_min = min(r$iter_total), iter_max = max(r$iter_total),
-               at_cap = sum(r$stage2_at_cap), left = mean(r$left), seconds = mean(r$seconds))
+               # at cap = cap reached with cells left, derived here so cached runs follow it
+               at_cap = sum(r$iter2 == MAX_ITER[2] & r$left > 0), left = mean(r$left),
+               seconds = mean(r$seconds))
   })
   do.call(rbind, rows)
 }
@@ -235,7 +255,7 @@ paired_diff <- function(res, scen, pick) {
   data.frame(tol1 = agg$tol1, tol2 = agg$tol2, d_mean = agg$x[, "mean"], d_sd = agg$x[, "sd"])
 }
 
-# Builder's suggestion beside the spec rule (Carl to choose): the rule can only trade
+# Builder's aggregations (not the spec rule; reported as such). The rule can only trade
 # accuracy against iterations through the old engine's count. "Efficient" = among settings
 # whose mean paired scaled-RMSE difference to the rule's pick is within 2 standard errors
 # (SD / sqrt(replicates)), the one with the fewest mean total iterations (ties: larger tol).
@@ -246,6 +266,26 @@ efficient_setting <- function(s, res, scen, pick) {
   new[order(new$iter, -new$tol1, -new$tol2), ][1, ]
 }
 
+# The setting with fewer mean iterations than `chosen` that came closest to passing the
+# 2-SE screen, and by how much it missed (NULL if none): shows how fragile the pick is.
+efficient_near_miss <- function(s, res, scen, pick, chosen) {
+  pd <- paired_diff(res, scen, pick)
+  pd$miss_by <- pd$d_mean - 2 * pd$d_sd / sqrt(length(REP_SEEDS))
+  new <- merge(s[s$engine == "new" & s$scenario == scen, c("tol1", "tol2", "iter")], pd)
+  out <- new[new$miss_by > 0 & new$d_mean > 0 & new$iter < chosen$iter, ]
+  if (!nrow(out)) return(NULL)
+  out[which.min(out$miss_by), ]
+}
+
+# How unstable the per-scenario ranking is: the number of distinct settings that are best
+# in some replicate.
+n_rep_best <- function(res, scen) {
+  new <- res[res$engine == "new" & res$scenario == scen, ]
+  best <- vapply(split(new, new$rep), function(x)
+    paste(x$tol1, x$tol2)[which.min(x$rmse_scaled)], "")
+  length(unique(best))
+}
+
 # One default for all scenarios: the setting whose worst (over scenarios) mean paired
 # scaled-RMSE excess over that scenario's pick is smallest (minimax regret).
 common_setting <- function(res, picks) {
@@ -253,7 +293,7 @@ common_setting <- function(res, picks) {
     d <- paired_diff(res, sc, picks[[sc]]); d$scenario <- sc; d })
   pd <- do.call(rbind, pds)
   worst <- stats::aggregate(d_mean ~ tol1 + tol2, pd, max)
-  worst[which.min(worst$d_mean), ]
+  worst[order(worst$d_mean), ][1:2, ]          # best and runner-up, for the margin
 }
 
 # --- report ------------------------------------------------------------------------------------
@@ -294,7 +334,17 @@ write_report <- function(res, path) {
   stopifnot(!vapply(picks, is.null, TRUE))   # BLOCKING: the proposal below needs a pick per scenario
   eff <- lapply(names(SCENARIOS), function(sc) efficient_setting(s, res, sc, picks[[sc]]))
   names(eff) <- names(SCENARIOS)
-  common <- common_setting(res, picks)
+  common2 <- common_setting(res, picks)
+  common <- common2[1, ]; runner <- common2[2, ]
+  near <- lapply(names(SCENARIOS), function(sc)
+    efficient_near_miss(s, res, sc, picks[[sc]], eff[[sc]]))
+  names(near) <- names(SCENARIOS)
+  near <- near[!vapply(near, is.null, TRUE)]
+  near_txt <- if (!length(near)) "" else paste0(" Sensitivity: ", paste(vapply(names(near), function(sc)
+    sprintf("in (%s) tol = c(%s, %s) has fewer iterations and misses the 2-SE screen by only %s",
+            sc, near[[sc]]$tol1, near[[sc]]$tol2, formatC(near[[sc]]$miss_by, format = "e", digits = 1)), ""),
+    collapse = "; "), ".")
+  rep_best <- vapply(names(SCENARIOS), function(sc) n_rep_best(res, sc), 1L)
   setting <- function(r) sprintf("tol = c(%s, %s)", r$tol1, r$tol2)
   per_scen <- function(lst) paste(sprintf("(%s) %s", names(lst), vapply(lst, setting, "")),
                                   collapse = "; ")
@@ -320,19 +370,23 @@ write_report <- function(res, path) {
             paste(sprintf("(%s) %s", names(rmse_level), fmt(rmse_level, 2)), collapse = ", "),
             paste(sprintf("(%s) %s", names(old_rmse), fmt(old_rmse, 3)), collapse = ", "),
             paste(sprintf("(%s) %d", names(cap_new), cap_new), collapse = ", "), n_new),
-    sprintf("- Proposed default: %s, the one setting closest to every scenario's pick (smallest worst-case paired RMSE excess). The rule's picks per scenario: %s. Builder's alternative (fewest iterations within 2 standard errors of each pick): %s.",
-            setting(common), per_scen(picks), per_scen(eff)),
+    sprintf("- **Decision (Carl, 2026-11-24): keep %s, the current defaults.** Accuracy is flat over the grid (largest mean paired gap %s scaled-RMSE units) and the iteration condition never binds, so no setting in the grid is supported over the current one.",
+            DECISION, fmt(max(spread), 3)),
+    sprintf("- Spec rule picks per scenario: %s. Builder's aggregations (not the spec rule; see Definitions): common setting %s, ahead of the runner-up %s by %s in worst-case excess, while the best setting differs between replicates (%s distinct best settings in %d replicates); efficient setting %s.%s",
+            per_scen(picks), setting(common), setting(runner), fmt(runner$d_mean - common$d_mean, 4),
+            paste(sprintf("(%s) %d", names(rep_best), rep_best), collapse = ", "), length(REP_SEEDS),
+            per_scen(eff), near_txt),
     sprintf("- Uncertainty: %d replicates per setting, and the gaps between settings are of the size of their paired SD, so the ranking within the grid is not stable; the choice is mainly one of iteration cost. The old engine's runs are not reproducible (its parallel workers are not seeded), so its numbers are means over replicates and would move somewhat on a rerun.", length(REP_SEEDS)), "",
     "## Definitions (choices for Carl to confirm)", "",
     "- **Scaled RMSE** (selection metric): per replicate, the root mean squared error over all imputed cells of numeric columns, each error divided by the SD of that column's observed values (the scale the stopping rule uses), pooled over columns; then the mean over replicates. Constant columns are left out (filled exactly). **Raw RMSE** is the same without scaling. **Factor accuracy** (scenario iii) is the share of imputed factor-like cells (factor, ordered, character, logical) with the true label; it is reported, not used to select.",
     "- **Total iterations**: stage 1 + stage 2 iterations. For the old engine, counted from the lines starting `Iteration` in its printed log.",
     "- **Selection rule** (spec section 5.4): per scenario, the setting with the smallest mean scaled RMSE whose mean total iterations do not exceed the old engine's mean.",
     "- **Diff. to selected**: per replicate, the setting's scaled RMSE minus the selected setting's on the same data set; mean (SD) over replicates. Positive means worse than the selected setting.",
-    "- **Builder's alternative**: among settings whose mean paired difference to the scenario's pick is at most 2 standard errors (SD / sqrt(5)), the one with the fewest mean total iterations (ties: the larger tol).",
-    "- **Stage 2 at cap**: replicates whose stage 2 ran to its iteration cap (60). **Cells left**: mean number of imputed cells still not converged at the end of stage 2 (old engine: from its log).", "",
+    "- **Builder's aggregations** (added for this report; not part of the spec rule, and with margins far below the replicate noise): the *common setting* is the setting whose worst-case (over scenarios) mean paired scaled-RMSE excess over that scenario's pick is smallest; the *efficient setting* of a scenario is, among settings whose mean paired difference to the pick is at most 2 standard errors (SD / sqrt(5)), the one with the fewest mean total iterations (ties: the larger tol).",
+    "- **Stage 2 at cap**: replicates whose stage 2 ran to its iteration cap (60) with cells still not converged. **Cells left**: mean number of imputed cells still not converged at the end of stage 2 (old engine: from its log; in scenario iii these are cells of its indicator matrix, see the note under that table).", "",
     "## Setup", "",
     "- Scenarios: (i) `sim_numeric(200, 500)` (log-normal, rank-3 signal plus noise) with 5 % of cells missing completely at random (MCAR); (ii) the same data with the lowest 5 % of each column missing (left-censored, a detection-limit pattern); (iii) `sim_mixed(900, extra = 10)` (20 columns: numeric, integer, factor, ordered factor, character, logical, a constant and 10 noise columns) with 5 % MCAR over all columns.",
-    sprintf("- Replicate r (r = %s) uses data seed r, hole seed %d + r, and seed r for both engines (the old engine after a scoped `set.seed(r)`).",
+    sprintf("- Replicate r (r = %s) uses data seed r, hole seed %d + r, and `seed = r` for `mvImpute()`. The old engine is called after a scoped `set.seed(r)`, as the brief asks; that has no effect on its parallel workers, which seed themselves.",
             paste(REP_SEEDS, collapse = ", "), HOLE_SEED_OFFSET),
     "- `mvImpute()`: defaults (ranger, 100 trees, mtry 5, guess \"minVar\", maxIter 15 and 60) except `tol`; one 2-worker multisession pool per process.",
     sprintf("- Old engine: StatTools %s, commit `%s`; `mvImpWrap(method = \"RF\", rfMeth = \"ranger\", tol1 = 0.05, n1 = 15, tol2 = 0.025, n2 = 60, nCore = 2)`; first guess column minimum (its default). Its tolerance is relative to the current value, not to the column SD, so its tol values (marked *) are not on the same scale as the new ones.",
@@ -343,7 +397,8 @@ write_report <- function(res, path) {
             utils::packageVersion("future"), fmt(sum(res$seconds) / 60, 0)), "")
   for (sc in names(SCENARIOS))
     body <- c(body, sprintf("## Scenario %s: %s", sc, SCENARIOS[[sc]]), "",
-              scenario_table(s, res, sc, picks[[sc]]), "")
+              scenario_table(s, res, sc, picks[[sc]]), "",
+              if (sc == "iii") c(OLD_ENGINE_III_NOTE, ""))
   writeLines(body, path, useBytes = TRUE)
   invisible(list(summary = s, picks = picks, efficient = eff, common = common))
 }

@@ -42,7 +42,8 @@ is at least 2, otherwise serial. \code{1}: serial. \code{k > 1}: a multisession 
 workers. The previous plan is restored on exit.}
 
 \item{tol}{Numeric vector, one value per stage: the convergence tolerance as a
-fraction of the standard deviation of the observed values of each numeric column.}
+fraction of the standard deviation of the observed values of each numeric column.
+The defaults were chosen by simulation.}
 
 \item{maxIter}{Whole numbers, one per stage: the iteration cap of that stage.
 \code{length(maxIter)} must equal \code{length(tol)}.}
@@ -156,6 +157,10 @@ down for the call and restarted when the call ends. \code{workers = NULL} uses a
 non-sequential plan as it is and leaves it in place.
 \item \code{oob_error} is estimated on observed rows, so when the gaps are not missing at
 random it overstates how well the imputed values can be predicted.
+\item Known limitation: on tables with factor-like columns the final stage often reaches
+\code{maxIter}, because predicted factor levels can cycle between iterations, so the "not
+converged" warning is common there. The cells concerned are listed in the
+diagnostics' \code{not_converged}.
 }
 }
 

@@ -5,8 +5,8 @@
 - Compared the stage engine with common random numbers (crn, the current default: a column reuses one random stream in every iteration of a stage) and without (a fresh sub-stream per iteration), on numeric data (a) and on two associated factors missing in the same rows (b); 5 seeds in (a), 20 in (b), tol = (0.05, 0.025), maxIter = (15, 60), ranger, 2 workers.
 - (a) Mean total iterations: 13.0 with crn, 73.8 without. Paired difference in scaled RMSE (crn minus no crn): mean 0.0031, SD over seeds 0.0014.
 - (b) Final stage at its cap: 1 of 20 runs with crn, 6 of 20 without; flip-backs (2-cycle signature) summed over runs: 144 with crn, 1935 without.
-- Rule verdict (spec 5.5, "kept unless it does harm"; harm = more total iterations on average, a scaled RMSE worse by more than 2 standard errors of the paired difference, or the final stage at its cap in (b) more often than without crn): harm found in rmse. Size: with crn the scaled RMSE is 0.38 % higher (worse in 5 of 5 seeds) at 5.7 times fewer total iterations. Decision for Carl: keep crn = TRUE (fewer iterations, fewer cycles in (b)) or drop it (slightly lower RMSE in (a)).
-- Uncertainty: 5 seeds in (a), 20 in (b). In (a) the two settings also differ in iterations run, so the RMSE gap may come from the extra iterations rather than from the random streams themselves (not tested here). Seconds were measured while other jobs ran on the machine and are inflated.
+- Rule verdict (spec 5.5, "kept unless it does harm"; harm = more total iterations on average, a scaled RMSE worse by more than 2 standard errors of the paired difference, or the final stage at its cap in (b) more often than without crn): harm found in rmse. Size: with crn the scaled RMSE is 0.38 % higher (worse in 5 of 5 seeds) at 5.7 times fewer total iterations. The RMSE gap is confounded with iteration count (13.0 against 73.8 iterations): the extra iterations, rather than the random streams, may explain it (not tested).
+- **Carl's decision (2026-11-24): keep crn = TRUE.** Uncertainty: 5 seeds in (a), 20 in (b); seconds were measured while other jobs ran on the machine and are inflated.
 
 ## Definitions
 
@@ -42,6 +42,8 @@ Without crn the engine rebuilds each column's sub-stream from the start of the s
 ## (b) Two associated factors missing in the same rows
 
 Data: `sim_mixed(300)` plus `fac3b`, a copy of `fac3` whose labels are permuted within a random 10 % of rows; both missing in the same 40 random rows (no other gaps). The table after iteration k is recomputed as the engine run with maxIter = k, which is exact (the first k iterations do not depend on maxIter).
+
+Reading the crn rows: the two factors are each other's only imputed predictors and their training rows hold no imputed cells, so under crn each factor's model is the same in every iteration and an iteration is a fixed, deterministic map. A change therefore shows twice (`Nx2`: a label changes, then its partner follows) and then stops (`0x2`: two unchanged predictions freeze a cell). Seed 6's 2-cycle with crn is a genuine cycle of that map, not Monte Carlo noise.
 
 | seed | crn | fac3 = fac3b | iter. 1 + 2 | stage 2 at cap | labels changed per iteration, stage 1 | stage 2 | flip-backs | flip-backs, last iteration | accuracy fac3 / fac3b |
 |---|---|---|---|---|---|---|---|---|---|
