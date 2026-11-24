@@ -15,7 +15,7 @@
 #   Rscript bench/calibrate_tol.R report  # the report from a complete cache
 # Dependencies: mvImputer (installed: multisession workers load the installed package);
 #   StatTools 0.0.917 (the old engine, the reference); future (one 2-worker pool for all
-#   mvImpute() calls); withr (scoped seeds). Test helpers are source()d by path.
+#   mvImpute() calls); withr (scoped seeds). Test helpers and bench/bench-common.R are source()d by path.
 #
 # Choices recorded here (Carl to confirm):
 # - Selection metric is the SCALED RMSE, pooled over all imputed numeric cells of a data
@@ -34,16 +34,14 @@
 stopifnot(file.exists("DESCRIPTION"),                                   # BLOCKING
           read.dcf("DESCRIPTION", fields = "Package")[1, 1] == "mvImputer")
 source("tests/testthat/helper-sim.R")
+source("bench/bench-common.R")     # scenarios, scoring and the old-engine runner, shared with benchmark.R
 
 TOL1_GRID  <- c(0.1, 0.05, 0.025)
 TOL2_GRID  <- c(0.05, 0.025, 0.01, 0.005)
 MAX_ITER   <- c(15, 60)                       # mvImpute() default, equal to the old n1, n2
 REP_SEEDS  <- 1:5                             # data, holes and engine seeds derive from these
-HOLE_SEED_OFFSET <- 1000L                     # holes use a seed apart from the data's
-HOLE_FRAC  <- 0.05
 WORKERS    <- 2L
-OLD_ARGS   <- list(method = "RF", rfMeth = "ranger", tol1 = 0.05, n1 = 15, tol2 = 0.025,
-                   n2 = 60, nCore = WORKERS)  # mvImpWrap defaults, written out
+P_NUMERIC  <- 500L                            # columns of the numeric scenarios
 OUT_DIR    <- "bench/output"
 CACHE_DIR  <- file.path(OUT_DIR, "cache-calibration")
 # Carl's decision of 2026-11-24, recorded in the report (the grid does not choose it).
@@ -61,80 +59,7 @@ OLD_ENGINE_III_NOTE <- paste(
 SCENARIOS  <- c(i = "numeric 200 x 500, 5 % MCAR", ii = "numeric 200 x 500, 5 % left-censored",
                 iii = "mixed 900 x 20, 5 % MCAR")
 
-# BLOCKING: the reference must be the pinned old engine, or the comparison is not the one
-# the spec asks for.
-stopifnot(requireNamespace("StatTools", quietly = TRUE),
-          as.character(utils::packageVersion("StatTools")) == "0.0.917")
-
-# --- scenarios ------------------------------------------------------------------------
-# truth: complete table; holes: the table with gaps given to mvImpute(); old_input: the
-# numeric matrix the old engine gets; decode_old: old engine output -> table like truth.
-make_scenario <- function(id, rep) {
-  hole_seed <- HOLE_SEED_OFFSET + rep
-  if (id %in% c("i", "ii")) {
-    truth <- sim_numeric(200, 500, seed = rep)
-    holes <- punch_holes(truth, HOLE_FRAC, if (id == "i") "mcar" else "left", seed = hole_seed)
-    return(list(truth = truth, holes = holes, old_input = holes, decode_old = identity))
-  }
-  truth <- sim_mixed(900, seed = rep, extra = 10)
-  holes <- punch_holes(truth, HOLE_FRAC, "mcar", seed = hole_seed)
-  onehot <- one_hot(holes)
-  list(truth = truth, holes = holes, old_input = onehot$M,
-       decode_old = function(M) decode_one_hot(M, onehot$blocks, holes))
-}
-
-# Factor-like columns (factor, ordered, character, logical) -> K indicator columns each;
-# numeric columns pass through. model.frame(na.action = na.pass): the default drops NA rows.
-one_hot <- function(d) {
-  blocks <- list(); parts <- list()
-  for (nm in names(d)) {
-    x <- d[[nm]]
-    if (is.numeric(x)) { parts[[nm]] <- matrix(as.numeric(x), ncol = 1, dimnames = list(NULL, nm)); next }
-    f <- if (is.factor(x)) x else factor(x)
-    m <- stats::model.matrix(~ f - 1, stats::model.frame(~ f, na.action = stats::na.pass))
-    colnames(m) <- make.names(paste0(nm, "_", levels(f)))
-    stopifnot(ncol(m) == nlevels(f), nrow(m) == nrow(d))          # BLOCKING: full K, no row dropped
-    blocks[[nm]] <- list(cols = colnames(m), levels = levels(f))
-    parts[[nm]] <- m
-  }
-  M <- do.call(cbind, unname(parts))
-  attributes(M)[c("assign", "contrasts")] <- NULL
-  list(M = M, blocks = blocks)
-}
-
-# Largest indicator wins; max.col(ties.method = "first") sends ties to the first level.
-decode_one_hot <- function(M, blocks, template) {
-  out <- template
-  for (nm in names(template)) {
-    if (is.null(blocks[[nm]])) { out[[nm]] <- M[, nm]; next }
-    out[[nm]] <- blocks[[nm]]$levels[max.col(M[, blocks[[nm]]$cols, drop = FALSE],
-                                             ties.method = "first")]
-  }
-  out
-}
-
-# --- scoring ----------------------------------------------------------------------------
-# Scaled RMSE pooled over imputed cells of numeric columns with spread (a constant column
-# is filled exactly and has scale 0); factor-like columns are compared as labels.
-score_run <- function(imp, sc) {
-  truth <- as.data.frame(sc$truth); holes <- as.data.frame(sc$holes); imp <- as.data.frame(imp)
-  num_r <- num_s <- numeric(); hits <- logical()
-  for (nm in names(truth)) {
-    miss <- is.na(holes[[nm]])
-    if (!any(miss)) next
-    if (is.numeric(truth[[nm]])) {
-      s <- stats::sd(holes[[nm]][!miss])
-      if (!(s > 0)) next
-      r <- as.numeric(imp[[nm]][miss]) - truth[[nm]][miss]
-      num_r <- c(num_r, r); num_s <- c(num_s, r / s)
-    } else {
-      hits <- c(hits, as.character(imp[[nm]][miss]) == as.character(truth[[nm]][miss]))
-    }
-  }
-  stopifnot(length(num_r) > 0, !anyNA(num_r), !anyNA(hits))     # BLOCKING: no cell left unimputed
-  c(rmse_scaled = sqrt(mean(num_s^2)), rmse_raw = sqrt(mean(num_r^2)),
-    factor_acc = if (length(hits)) mean(hits) else NA_real_)
-}
+assert_old_engine()                              # BLOCKING (bench-common.R)
 
 # --- engines ------------------------------------------------------------------------------
 # The final-stage "not converged" warning is a measured outcome here (stage2_at_cap), so it
@@ -156,29 +81,13 @@ run_new <- function(sc, tol1, tol2, seed) {
     stage2_at_cap = it[2] == MAX_ITER[2] && left > 0, left = left, seconds = secs)
 }
 
-# set.seed(rep) before the call, as the brief asks, but scoped: with_seed restores the
-# session's RNG afterwards, and the kinds are pinned to R's defaults so the seed means the
-# same whatever ran before. Iterations and the cells left at the cap are read from the
-# engine's printed log.
+# The old engine is run and its log read by old_engine() (bench-common.R): set.seed(rep)
+# before the call as the brief asks, scoped, and iterations / cells left from its printed log.
 run_old <- function(sc, seed) {
-  t0 <- proc.time()[["elapsed"]]
-  log <- utils::capture.output(
-    res <- withr::with_seed(seed, .rng_kind = "Mersenne-Twister", .rng_normal_kind = "Inversion",
-                            .rng_sample_kind = "Rejection",
-                            do.call(StatTools::mvImpWrap, c(list(MAT = sc$old_input), OLD_ARGS))))
-  secs <- proc.time()[["elapsed"]] - t0
-  is_iter <- grepl("^Iteration", log)
-  second  <- which(grepl("SECOND ROUND", log))
-  stopifnot(length(second) == 1L, sum(is_iter) >= 2L)             # BLOCKING: log format as read
-  it1 <- sum(is_iter[seq_len(second)]); it2 <- sum(is_iter) - it1
-  # mvImp prints "Still N NAs" only when a stage stops at its cap with cells left, so the
-  # stage-2 count is read from the lines after "SECOND ROUND" only (stage 1 has its own).
-  log2  <- log[seq.int(second + 1L, length(log))]
-  still <- regmatches(log2, regexpr("Still [0-9]+ NAs", log2))
-  stopifnot(length(still) <= 1L)                                   # BLOCKING: log format as read
-  left <- if (length(still)) as.numeric(gsub("[^0-9]", "", still)) else 0
-  c(score_run(sc$decode_old(res), sc), iter1 = it1, iter2 = it2, iter_total = it1 + it2,
-    stage2_at_cap = it2 == OLD_ARGS$n2 && left > 0, left = left, seconds = secs)
+  o <- old_engine(sc$old_input, WORKERS, seed)
+  c(score_run(sc$decode_old(o$res), sc), iter1 = o$it1, iter2 = o$it2,
+    iter_total = o$it1 + o$it2, stage2_at_cap = o$it2 == o$n2 && o$left > 0, left = o$left,
+    seconds = o$seconds)
 }
 
 # One cached run: the key names engine, scenario, setting and replicate.
@@ -194,7 +103,7 @@ run_design <- function(design) {
   rows <- vector("list", nrow(design))
   for (k in seq_len(nrow(design))) {
     d <- design[k, ]
-    sc <- make_scenario(d$scenario, d$rep)
+    sc <- make_scenario(d$scenario, d$rep, P_NUMERIC)
     key <- sprintf("%s_%s_%s_%s_r%d", d$engine, d$scenario, d$tol1, d$tol2, d$rep)
     res <- cached(key, if (d$engine == "old") run_old(sc, d$rep) else
       run_new(sc, d$tol1, d$tol2, d$rep))
