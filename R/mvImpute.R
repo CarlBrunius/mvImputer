@@ -59,17 +59,20 @@
 #'   unchanged (gaps stay gaps), are never predictors and are never imputed. `exclude`
 #'   covers only the columns it names: a copy or a derived version of the outcome left in
 #'   `X` still informs every model. `mvImpute()` cannot fit on training rows and apply the
-#'   fit to test rows; to keep a test set untouched, impute it in a separate call.
+#'   fit to test rows; to keep a test set untouched, impute it in a separate call (the
+#'   models then learn from fewer rows, so its imputations are likely less accurate; not
+#'   measured).
 #' * **Missing at random.** The models assume that values are missing at random given the
 #'   other columns. Values missing because they are below a detection limit (missing not
 #'   at random) are imputed too high by the forest backends, which cannot predict below the
 #'   observed range. In a simulation where the lowest 5 % of each column were missing, all
 #'   forest imputations lay above the true values, and leaving the column minimum in place
-#'   was much closer to the truth (SD-scaled RMSE about 0.06 against 0.44). That is one
-#'   simulated setting, the one most favourable to a minimum fill. `method = "pls"` is
-#'   linear and can extrapolate below the observed range, including to negative values on
-#'   untransformed intensities (57 % of its imputations in one such simulation); no report
-#'   evaluates PLS.
+#'   was much closer to the truth (SD-scaled RMSE 0.065 against 0.469 on the original
+#'   scale; `bench/output/detection-limit.md`). That is one simulated setting, the one most
+#'   favourable to a minimum fill. `method = "pls"` is linear and can extrapolate below the
+#'   observed range, including to negative values on untransformed intensities (59 % of its
+#'   imputations in that simulation). On log-scale data PLS was closest of the package's
+#'   methods in the detection-limit simulations.
 #' * **Single imputation.** The result is one deterministic completed table. Downstream
 #'   standard errors that treat imputed values as observed are too small.
 #' * **Linear dependencies.** Exact linear dependencies among numeric columns that you
@@ -87,6 +90,10 @@
 #' shape of `X` supplies a start per cell; it is read only at the missing cells of numeric
 #' columns, where it must be a finite number. Factor-like columns always start at their
 #' most frequent observed level (ties: the first level).
+#'
+#' Which settings suit which kind of data (log transform, `method`, `guess`, `forceZero`) is
+#' discussed in the README section "Choosing settings for your data", with the simulations
+#' behind it in `bench/output/detection-limit.md`.
 #'
 #' @section Other notes:
 #' * An integer matrix with gaps is returned as a double matrix (a matrix has one storage
@@ -110,7 +117,10 @@
 #'   three simulated runs), and the same tables without their factor-like columns
 #'   converged. The likely cause is factor levels that change between iterations and so
 #'   change the other columns' predictors, but this is not proven. The cells concerned are
-#'   listed in the diagnostics' `not_converged`.
+#'   listed in the diagnostics' `not_converged`. A factor cell that keeps cycling is returned
+#'   at the level of the last iteration, so for a cycle of two levels the result depends on
+#'   whether the cap is odd or even (in one simulated run, `maxIter` 60 against 61 in the
+#'   final stage changed one imputed label).
 #'
 #' @param X A data frame or a numeric matrix. The same class is returned.
 #' @param method `"ranger"` (default), `"randomForest"`, or `"pls"` (needs the
@@ -119,8 +129,8 @@
 #'   were evaluated with `"ranger"` only. With `"randomForest"`, common random numbers do
 #'   not keep the predictions stable between iterations, so runs often reach `maxIter`: in
 #'   one check (200 x 100, 5 % random gaps, 3 runs) it ran 15 + 60, 15 + 43 and 15 + 44
-#'   iterations against 5 or 6 + 6 for ranger, about 5 times the run time. No report
-#'   evaluates `"pls"`.
+#'   iterations against 5 or 6 + 6 for ranger, about 5 times the run time. `"pls"` was
+#'   evaluated only on simulated detection-limit gaps (`bench/output/detection-limit.md`).
 #' @param exclude Character vector of column names that are passed through untouched
 #'   (identifiers, the outcome). The checks on column values and types skip them; the
 #'   checks that column names are unique, that `X` is a data frame or numeric matrix and
@@ -136,7 +146,10 @@
 #' @param tol Numeric vector, one value per stage: the convergence tolerance as a
 #'   fraction of the standard deviation of the observed values of each numeric column.
 #'   The defaults were kept after a simulation, with `method = "ranger"`, that found no
-#'   setting clearly better (see NEWS and `method`).
+#'   setting clearly better in accuracy (see NEWS and `method`). The looser `c(0.1, 0.05)`
+#'   was as accurate with fewer iterations (mean total 9.8 against 13.0 on random gaps, 8.4
+#'   against 11.6 on left-censored gaps; `bench/output/calibration.md`); the simulation shows
+#'   no accuracy cost of the looser tolerance.
 #' @param maxIter Whole numbers, one per stage: the iteration cap of that stage.
 #'   `length(maxIter)` must equal `length(tol)`.
 #' @param guess `"minVar"`, `"median"`, `"minTotal"`, or a matrix or data frame with the

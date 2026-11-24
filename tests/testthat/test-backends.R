@@ -18,12 +18,13 @@ for (m in c("ranger", "randomForest", "pls")) {
     expect_true(all(r$pred %in% 1:4)); expect_gt(mean(r$pred == y[201:300]), 0.8)
   })
 }
-test_that("a constant predictor is dropped without backend warnings", {
-  skip_if_not_installed("mixOmics")
-  x <- cbind(withr::with_seed(1, matrix(rnorm(60 * 3), 60)), k = 1); colnames(x)[1:3] <- paste0("x", 1:3)
-  for (m in c("ranger", "randomForest", "pls"))
+for (m in c("ranger", "randomForest", "pls")) {
+  test_that(paste(m, "drops a constant predictor without backend warnings"), {
+    if (m == "pls") skip_if_not_installed("mixOmics")
+    x <- cbind(withr::with_seed(1, matrix(rnorm(60 * 3), 60)), k = 1); colnames(x)[1:3] <- paste0("x", 1:3)
     expect_no_warning(withr::with_seed(2, fit_predict(m, x[1:50, 1], x[1:50, -1], x[51:60, -1], FALSE, NA, 1, 50, 2, 2)))
-})
+  })
+}
 test_that("droplevels mapping: a level absent from training is never predicted and the codes map back correctly", {
   x <- withr::with_seed(1, matrix(rnorm(100 * 2), 100)); colnames(x) <- c("x1", "x2")
   y <- ifelse(x[, 1] > 0, 1L, 3L)                    # level 2 of 3 never observed

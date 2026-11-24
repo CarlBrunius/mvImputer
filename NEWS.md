@@ -63,6 +63,9 @@ where nothing else changed.
   fewer than two observed values, user-supplied one-hot blocks); constant columns are filled
   with their value and take no part in the iteration.
 * A warning when the final stage ends with cells not converged.
+* README section "Choosing settings for your data", with a detection-limit simulation behind
+  it (`bench/detection_limit.R`, `bench/output/detection-limit.md`): which settings suit which
+  kind of data, with each recommendation marked as simulated or as reasoning.
 
 ## Speed against StatTools 0.0.917
 
@@ -79,13 +82,17 @@ worker and the new one runs one.
 
 ## Default settings (decided 2026-11-24, from simulation)
 
-All evidence in this section, and the speed figures above, come from `method = "ranger"`.
+The `tol` and common-random-number choices below, and the speed figures above, rest on
+`method = "ranger"` only; the last bullet is a separate check of `method = "randomForest"`.
 
 * `tol = c(0.05, 0.025)` stays the default. Over a grid of 12 tolerance pairs on simulated
   omics-like data (random and left-censored gaps) and a mixed covariate table, imputation
   accuracy was flat (largest mean difference 0.003 in SD-scaled RMSE), so no other setting
-  was better supported. StatTools 0.0.917 ran to its iteration caps in every run, so
-  its iteration count did not narrow the choice.
+  was better supported. The loosest pair, `tol = c(0.1, 0.05)`, was as accurate with fewer
+  iterations (mean total 9.8 against 13.0 on random gaps, 8.4 against 11.6 on left-censored
+  gaps; `bench/output/calibration.md`), so "no setting better" concerns accuracy, not run
+  time. StatTools 0.0.917 ran to its iteration caps in every run, so its iteration count
+  did not narrow the choice.
 * Common random numbers stay on: within a stage, each column reuses one random stream in
   every iteration. Compared with fresh random numbers per iteration, this gave a 0.4 %
   higher SD-scaled RMSE and a 1.8 % higher raw RMSE (higher in 5 of 5 seeds;
@@ -107,14 +114,16 @@ All evidence in this section, and the speed figures above, come from `method = "
   not proven. The cells concerned are listed in `attr(out, "mvImpute")$not_converged`. To be
   revisited after first real use.
 * Gaps below a detection limit are missing not at random, and the forest backends impute
-  them too high: they cannot predict below the observed range. In a check (200 x 100, the
-  lowest 5 % of each column missing, 3 replicates) every imputed value lay above the truth,
-  and leaving the column minimum in place was much closer to the truth (SD-scaled RMSE about
-  0.06 against 0.44). That is one simulated setting, the one most favourable to a minimum
-  fill. `guess` hardly changes the result (0.442 with `"minVar"` against 0.443 with
-  `"median"`). `method = "pls"` is linear and can extrapolate below the observed range,
-  including to negative values on untransformed intensities (57 % of its imputations in one
-  such simulation); no report evaluates PLS.
+  them too high: they cannot predict below the observed range. In a simulation (200 x 100, the
+  lowest 5 % of each column missing, 5 data sets) every imputed value lay above the truth,
+  and leaving the column minimum in place was much closer to the truth (SD-scaled RMSE 0.065
+  against 0.469 on the original scale; `bench/output/detection-limit.md`). That is one
+  simulated setting, the one most favourable to a minimum fill. `guess` hardly changes the
+  result (ranger: 0.442 with `"minVar"` against 0.443 with `"median"` in an earlier
+  3-replicate check; PLS on log data: 0.953 against 0.954). `method = "pls"` is linear and
+  can extrapolate below the observed range, including to negative values on untransformed
+  intensities (59 % of its imputations in that simulation). On log-scale data PLS was
+  closest of the package's methods in the detection-limit simulations.
 * On simulated left-censored data (200 x 500, 5 % of the lowest values missing; 5 replicates)
   the raw RMSE of `mvImpute()` with the default `tol` was 2.7 % higher than that of StatTools
   0.0.917 (mean 0.593 against 0.578), higher in every replicate, while the SD-scaled RMSE was
@@ -123,4 +132,19 @@ All evidence in this section, and the speed figures above, come from `method = "
   decomposition of that data set a few cells in the highest-SD, heavy-tailed columns carried
   most of it. One repeat run of the old engine on the random-gap benchmark table moved its
   raw RMSE from 1.98 to 2.18 (about 10 %), so single-run raw RMSE comparisons are weak. The
-  cause is not established.
+  cause is not established. Common random numbers, and the earlier stop they bring, are one
+  possible contributor: on random gaps they gave a higher raw RMSE in 5 of 5 seeds
+  (`bench/output/experiments.md`); this is unproven for the left-censored case.
+* A factor cell that keeps cycling is returned at the level of the last iteration, so for a
+  cycle of two levels the result depends on whether the cap is odd or even (in one simulated
+  run, a final-stage `maxIter` of 60 against 61 changed one imputed label).
+
+## Assumptions to know about
+
+* **Pooled imputation.** Every row informs every imputed value, including rows that a later
+  cross-validation fold or test set holds out, so downstream cross-validated or test-set
+  performance is optimistic, more so if the outcome is a column of `X`. Leave the outcome out
+  of `X` or pass it in `exclude`. `mvImpute()` cannot fit on training rows and apply the fit
+  to test rows. Imputing a test set in a separate call keeps it untouched, at a cost: the
+  models then learn from fewer rows, so its imputations are likely less accurate (expected,
+  not measured here).
