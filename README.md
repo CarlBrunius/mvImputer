@@ -64,11 +64,11 @@ attr(out, "mvImpute")$iterations   # iterations run in each stage
 | `mvImpWrap()` (StatTools 0.0.917) | `mvImpute()` |
 |---|---|
 | `MAT` (matrix) | `X` (data frame or numeric matrix; the same class is returned) |
-| `method = "RF", rfMeth = "ranger"` | `method = "ranger"` (the default) |
+| `method = "RF", rfMeth = "ranger"` (what a default call ran) | `method = "ranger"` (the default) |
 | `method = "RF", rfMeth = "rf"` | `method = "randomForest"` |
-| `method = "PLS"` (the old default) | `method = "pls"` (needs `mixOmics`) |
+| `method = "PLS"` | `method = "pls"` (needs `mixOmics`) |
 | `rfMeth = "Rborist"` | dropped |
-| `guess = NULL` (column minimum) | `guess = "minVar"` (the default); `"median"`, `"minTotal"` or a matrix of the shape of `X` also work |
+| `guess = NULL` (column minimum) | `guess = "minVar"` (the default, as before); `"median"`, `"minTotal"` and a matrix of the shape of `X` are accepted as before |
 | `forceZero`, `nComp` | `forceZero`, `nComp`, unchanged |
 | `nCore` | `workers` (`NULL`: active plan, else up to 8 workers; `1`: serial) |
 | `tol1`, `tol2` | `tol = c(tol1, tol2)`: now a fraction of the column's standard deviation, not relative to the current value, so old values do not carry over (defaults `c(0.05, 0.025)`) |
@@ -88,6 +88,8 @@ each (`bench/output/benchmark.md` in the repository):
 
 * Numeric tables (200 x 1000, 5 % gaps): new/old wall time 0.36 to 0.54, because the new engine
   stopped after 11 to 14 iterations where the old one ran to its cap of 75.
+* The old engine ran two ranger threads in each worker and the new one runs one, so equal
+  worker counts give the new engine half the threads.
 * A small mixed table (900 x 20): new/old wall time 1.53 to 1.92, both engines at 75
   iterations. The higher cost per iteration may come from single-thread forests and
   dispatch overhead; this is a hypothesis, not tested.

@@ -39,7 +39,7 @@ First release. `mvImpute()` continues the `mvImp()` / `mvImpWrap()` imputer of S
 A column's model is now trained only on the rows where that column was originally observed.
 StatTools 0.0.917 trained on every row not still iterating, so converged imputed cells became
 training data for their own column. Imputed values therefore differ from the old engine's even
-where nothing else changed. (Decided 2026-11-23: pooled imputation, no `train` argument.)
+where nothing else changed.
 
 ## New features
 
@@ -89,10 +89,11 @@ repository). The old engine ran two ranger threads in each worker and the new on
   predicted factor levels can cycle between iterations, so the "not converged" warning is
   common there (54 of 60 simulated runs on a mixed table). The cells concerned are listed in
   `attr(out, "mvImpute")$not_converged`. To be revisited after first real use.
-* On simulated left-censored data (200 x 500, 5 % of the lowest values missing) the raw RMSE
-  of `mvImpute()` with the default `tol` was about 3 % higher than that of StatTools 0.0.917
-  (mean 0.593 against 0.578, which is 2.6 %; higher in all 5 replicates, by 0.9 % to 4.2 %),
-  while the SD-scaled RMSE was equal (0.494 against 0.492). In a decomposition on one
-  200 x 1000 data set the gap came from a few cells in the highest-SD, heavy-tailed columns,
-  and a smaller `tol` did not close it (0.595 at `tol = c(0.025, 0.005)`). Its cause is not
+* On simulated left-censored data (200 x 500, 5 % of the lowest values missing; 5 replicates)
+  the raw RMSE of `mvImpute()` with the default `tol` was 2.7 % higher than that of StatTools
+  0.0.917 (mean 0.593 against 0.578), higher in every replicate, while the SD-scaled RMSE was
+  equal (0.494 against 0.492); a smaller `tol` did not close the gap (0.595 at
+  `tol = c(0.025, 0.005)`). In one larger run (200 x 1000) the gap was 7 % to 9 %, and in a
+  decomposition of that data set a few cells in the highest-SD, heavy-tailed columns carried
+  most of it. Single runs of the old engine vary by about 10 % in raw RMSE. The cause is not
   established.
