@@ -182,6 +182,15 @@ each (`bench/output/benchmark.md` in the repository):
   iterations. The higher cost per iteration may come from single-thread forests and
   dispatch overhead; this is a hypothesis, not tested.
 
+## Related work
+
+The iterative random-forest imputation in mvImputer is related to missForest:
+Stekhoven DJ, Bühlmann P (2012). MissForest: non-parametric missing value imputation for
+mixed-type data. *Bioinformatics* 28(1):112-118. <https://doi.org/10.1093/bioinformatics/btr597>.
+mvImputer differs in its stopping rule (scaled by each column's SD), its PLS backend,
+training only on originally observed rows, two stages, and seeding that is reproducible
+across worker counts.
+
 ## Contact
 
 Carl Brunius, carl.brunius@gmail.com (maintainer) or carl.brunius@nbis.se. Bug reports:

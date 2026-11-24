@@ -9,7 +9,9 @@ Description: Imputes missing values in numeric and mixed-type tables
     Each column with gaps is predicted from all the others by an iterative
     random-forest or partial least squares model, by default in two stages,
     with a stopping rule scaled by the standard deviation of each numeric
-    column. Results are reproducible for a given seed whatever the number
+    column. The iterative random-forest approach is related to that of
+    Stekhoven and Bühlmann (2012) <doi:10.1093/bioinformatics/btr597>.
+    Results are reproducible for a given seed whatever the number
     of parallel workers. The caller's random-number state is restored on
     exit, except that the default seed = NULL takes one draw from it.
 License: MIT + file LICENSE
